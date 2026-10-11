@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { seasonsOf, toWebsiteHome, type UnitRow } from "@/lib/website-homes";
+import { currentPermitNumbers, seasonsOf, toWebsiteHome, type UnitRow } from "@/lib/website-homes";
 import { parseSeasons } from "@/lib/website-options";
 
 const unit = (over: Partial<UnitRow> = {}) =>
@@ -68,4 +68,21 @@ test("malformed season rows are dropped, good ones kept", () => {
 test("season text is parsed and bad lines are reported", () => {
   assert.equal(parseSeasons("NY | 2026-12-26 | 2027-01-03 | 2400\n\n").seasons.length, 1);
   assert.match(parseSeasons("NY | 2026-12-26 | nope | 2400").error ?? "", /line 1/);
+});
+
+test("the permit number shown is an active permit valid today, the longest-running one", () => {
+  const rows = [
+    { unit_id: "a", permit_number: "OLD-1", status: "active", issued_on: "2025-01-01", expires_on: "2026-12-31" },
+    { unit_id: "a", permit_number: "NEW-2", status: "active", issued_on: "2026-06-01", expires_on: "2027-05-31" },
+    { unit_id: "b", permit_number: "EXPIRED", status: "active", issued_on: "2025-01-01", expires_on: "2026-01-31" },
+    { unit_id: "c", permit_number: "LATER", status: "active", issued_on: "2026-11-01", expires_on: "2027-10-31" },
+    { unit_id: "d", permit_number: "PENDING", status: "pending", issued_on: "2026-01-01", expires_on: "2027-01-01" },
+  ] as Parameters<typeof currentPermitNumbers>[0];
+  const m = currentPermitNumbers(rows, "2026-10-11");
+  assert.equal(m.get("a"), "NEW-2");
+  assert.equal(m.has("b"), false);
+  assert.equal(m.has("c"), false);
+  assert.equal(m.has("d"), false);
+  assert.equal(toWebsiteHome(unit(), m.get("a") ?? null)!.permitNumber, "NEW-2");
+  assert.equal(toWebsiteHome(unit())!.permitNumber, null);
 });

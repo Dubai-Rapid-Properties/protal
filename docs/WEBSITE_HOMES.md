@@ -63,7 +63,7 @@ followed. Click the button again when prices change.
 ## API (service-to-service)
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `GET /api/public/homes` | none | published, active homes |
+| `GET /api/public/homes` | none | published, active homes, each with its current DET permit number (`permitNumber`, null without a valid permit) |
 | `GET /api/public/availability` | none | busy ranges per slug (bookings + Airbnb/Booking.com blocks) |
 | `POST /api/public/bookings` | `Bearer WEBSITE_API_KEY` | website booking → `website_book_unit()` (409 if dates taken) |
 | `PATCH /api/public/bookings/{ref}` | `Bearer WEBSITE_API_KEY` | `confirmed` or `cancelled` |
