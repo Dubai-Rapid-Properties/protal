@@ -7,6 +7,8 @@ and pushes its own bookings back.
 ## Publishing a home
 Unit page → **Website**. Fill in the title, area, type, photos and tick **Published**.
 Nightly rate, max guests, cleaning fee, weekend rate and weekly/monthly discounts come from the unit itself.
+**Where guests sleep** (one line per room, e.g. `Bedroom 1 | 1 king bed`) shows on the website as "Where you'll sleep".
+It needs migration `0030_website_beds.sql`; until that has run, the field is not shown and saving works as before.
 The database refuses to publish a home that lacks what the website needs (`units_website_ready`).
 
 ## Importing a home from its Airbnb listing
@@ -63,7 +65,7 @@ followed. Click the button again when prices change.
 ## API (service-to-service)
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `GET /api/public/homes` | none | published, active homes, each with its current DET permit number (`permitNumber`, null without a valid permit) |
+| `GET /api/public/homes` | none | published, active homes, each with its current DET permit number (`permitNumber`, null without a valid permit) and sleeping arrangements (`beds`: `[{room, beds}]`) |
 | `GET /api/public/availability` | none | busy ranges per slug (bookings + Airbnb/Booking.com blocks) |
 | `POST /api/public/bookings` | `Bearer WEBSITE_API_KEY` | website booking → `website_book_unit()` (409 if dates taken) |
 | `PATCH /api/public/bookings/{ref}` | `Bearer WEBSITE_API_KEY` | `confirmed` or `cancelled` |

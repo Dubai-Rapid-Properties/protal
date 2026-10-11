@@ -49,6 +49,8 @@ export interface WebsiteHome {
   mapsUrl: string | null;
   /** The DET holiday-home permit number, which Dubai requires on every listing; null without a valid permit. */
   permitNumber: string | null;
+  /** "Where you'll sleep": one row per room. */
+  beds: { room: string; beds: string }[];
 }
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -72,6 +74,20 @@ export function seasonsOf(unit: Pick<UnitRow, "website_seasons">): WebsiteSeason
     out.push({ from: s.from, to: s.to, rate, ...(typeof s.name === "string" && s.name ? { name: s.name } : {}) });
   }
   return out;
+}
+
+/** Well-formed sleeping rows only (migration 0030; an older database has no column, which reads as none). */
+export function bedsOf(unit: Partial<Pick<UnitRow, "website_beds">>): { room: string; beds: string }[] {
+  if (!Array.isArray(unit.website_beds)) return [];
+  const out: { room: string; beds: string }[] = [];
+  for (const raw of unit.website_beds) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const r = raw as Record<string, unknown>;
+    if (typeof r.room === "string" && r.room.trim() && typeof r.beds === "string" && r.beds.trim()) {
+      out.push({ room: r.room.trim(), beds: r.beds.trim() });
+    }
+  }
+  return out.slice(0, 12);
 }
 
 /** "bedrooms" is numeric(3,1) in the portal (1.5 allowed); the website counts whole bedrooms. */
@@ -144,5 +160,6 @@ export function toWebsiteHome(unit: UnitRow, permitNumber: string | null = null)
     lng: num(unit.website_lng),
     mapsUrl: unit.website_maps_url,
     permitNumber,
+    beds: bedsOf(unit),
   };
 }

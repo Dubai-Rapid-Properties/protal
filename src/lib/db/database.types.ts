@@ -4088,6 +4088,7 @@ export type Database = {
           website_maps_url: string | null;
           website_check_in: string;
           website_check_out: string;
+          website_beds: Json;
           website_seasons: Json;
         };
         Insert: {
@@ -4157,6 +4158,7 @@ export type Database = {
           website_maps_url?: string | null;
           website_check_in?: string;
           website_check_out?: string;
+          website_beds?: Json;
           website_seasons?: Json;
         };
         Update: {
@@ -4226,6 +4228,7 @@ export type Database = {
           website_maps_url?: string | null;
           website_check_in?: string;
           website_check_out?: string;
+          website_beds?: Json;
           website_seasons?: Json;
         };
         Relationships: [

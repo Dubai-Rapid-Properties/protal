@@ -7,7 +7,7 @@ import { requireProfile } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
 import { slugify } from "@/lib/listings";
 import { isAirbnbPhotoUrl } from "@/lib/airbnb/listing-page";
-import { WEBSITE_AMENITIES, WEBSITE_TYPES, parseSeasons } from "@/lib/website-options";
+import { WEBSITE_AMENITIES, WEBSITE_TYPES, parseBeds, parseSeasons } from "@/lib/website-options";
 
 export type WebsiteState = { error?: string; success?: string };
 
@@ -36,6 +36,7 @@ const schema = z.object({
   checkIn: z.string().regex(/^\d{2}:\d{2}$/, "Check-in time like 15:00"),
   checkOut: z.string().regex(/^\d{2}:\d{2}$/, "Check-out time like 11:00"),
   seasons: z.string().max(5000),
+  beds: z.string().max(3000),
 });
 
 export async function saveUnitWebsite(unitId: string, _prev: WebsiteState, formData: FormData): Promise<WebsiteState> {
@@ -67,11 +68,16 @@ export async function saveUnitWebsite(unitId: string, _prev: WebsiteState, formD
     checkIn: formData.get("checkIn") ?? "",
     checkOut: formData.get("checkOut") ?? "",
     seasons: formData.get("seasons") ?? "",
+    beds: formData.get("beds") ?? "",
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form." };
   const v = parsed.data;
   const seasons = parseSeasons(v.seasons);
   if (seasons.error) return { error: seasons.error };
+  // The field is only on the form once the database has the column (migration 0030).
+  const withBeds = formData.get("bedsField") === "1";
+  const beds = parseBeds(v.beds);
+  if (withBeds && beds.error) return { error: beds.error };
   if ((v.lat == null) !== (v.lng == null)) return { error: "Give both latitude and longitude, or neither." };
 
   const slug = slugify(v.slug || v.title);
@@ -97,6 +103,7 @@ export async function saveUnitWebsite(unitId: string, _prev: WebsiteState, formD
       website_check_in: v.checkIn,
       website_check_out: v.checkOut,
       website_seasons: seasons.seasons,
+      ...(withBeds ? { website_beds: beds.beds } : {}),
     })
     .eq("id", unitId);
   if (error) {

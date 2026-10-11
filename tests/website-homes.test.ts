@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { currentPermitNumbers, seasonsOf, toWebsiteHome, type UnitRow } from "@/lib/website-homes";
-import { parseSeasons } from "@/lib/website-options";
+import { bedsOf, currentPermitNumbers, seasonsOf, toWebsiteHome, type UnitRow } from "@/lib/website-homes";
+import { bedsToText, parseBeds, parseSeasons } from "@/lib/website-options";
 
 const unit = (over: Partial<UnitRow> = {}) =>
   ({
@@ -85,4 +85,25 @@ test("the permit number shown is an active permit valid today, the longest-runni
   assert.equal(m.has("d"), false);
   assert.equal(toWebsiteHome(unit(), m.get("a") ?? null)!.permitNumber, "NEW-2");
   assert.equal(toWebsiteHome(unit())!.permitNumber, null);
+});
+
+test("sleeping arrangements: parsed from the form, round-trip, and only good rows reach the website", () => {
+  const { beds, error } = parseBeds("Bedroom 1 | 1 king bed\n\n  Living room |1 sofa bed  ");
+  assert.equal(error, undefined);
+  assert.deepEqual(beds, [
+    { room: "Bedroom 1", beds: "1 king bed" },
+    { room: "Living room", beds: "1 sofa bed" },
+  ]);
+  assert.equal(bedsToText(beds), "Bedroom 1 | 1 king bed\nLiving room | 1 sofa bed");
+  assert.match(parseBeds("Bedroom 1").error ?? "", /line 1/);
+  assert.match(parseBeds("A | b | c").error ?? "", /line 1/);
+  assert.deepEqual(parseBeds("").beds, []);
+
+  assert.deepEqual(
+    bedsOf({ website_beds: [{ room: " Bedroom 1 ", beds: "1 king bed" }, { room: "", beds: "x" }, "junk", null] as never }),
+    [{ room: "Bedroom 1", beds: "1 king bed" }],
+  );
+  assert.deepEqual(bedsOf({}), []);
+  assert.deepEqual(toWebsiteHome(unit({ website_beds: beds } as never))!.beds, beds);
+  assert.deepEqual(toWebsiteHome(unit())!.beds, []);
 });

@@ -48,3 +48,29 @@ export const seasonsToText = (rows: unknown): string =>
           [r.name ?? "", r.from, r.to, r.rate].join(" | "))
         .join("\n")
     : "";
+
+export type BedRow = { room: string; beds: string };
+
+/** "Bedroom 1 | 1 king bed" per line → rows for the website's "Where you'll sleep"; bad lines are reported. */
+export function parseBeds(text: string): { beds: BedRow[]; error?: string } {
+  const beds: BedRow[] = [];
+  for (const [i, raw] of text.split("\n").entries()) {
+    const line = raw.trim();
+    if (!line) continue;
+    const [room, what, ...rest] = line.split("|").map((s) => s.trim());
+    if (!room || !what || rest.length || room.length > 60 || what.length > 80) {
+      return { beds: [], error: `Sleeping line ${i + 1}: use "Bedroom 1 | 1 king bed".` };
+    }
+    beds.push({ room, beds: what });
+  }
+  if (beds.length > 12) return { beds: [], error: "Sleeping arrangements: at most 12 rooms." };
+  return { beds };
+}
+
+export const bedsToText = (rows: unknown): string =>
+  Array.isArray(rows)
+    ? rows
+        .filter((r): r is BedRow => !!r && typeof r === "object" && typeof r.room === "string" && typeof r.beds === "string")
+        .map((r) => `${r.room} | ${r.beds}`)
+        .join("\n")
+    : "";
