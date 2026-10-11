@@ -47,6 +47,8 @@ export interface WebsiteHome {
   lat: number | null;
   lng: number | null;
   mapsUrl: string | null;
+  /** The DET holiday-home permit number, which Dubai requires on every listing; null without a valid permit. */
+  permitNumber: string | null;
 }
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -75,8 +77,27 @@ export function seasonsOf(unit: Pick<UnitRow, "website_seasons">): WebsiteSeason
 /** "bedrooms" is numeric(3,1) in the portal (1.5 allowed); the website counts whole bedrooms. */
 const wholeBedrooms = (v: number) => Math.max(0, Math.floor(v));
 
+export type PermitRow = Pick<
+  Tables<"holiday_home_permits">,
+  "unit_id" | "permit_number" | "status" | "issued_on" | "expires_on"
+>;
+
+/**
+ * The permit number to show per unit: an active permit valid on `today` (the same test as
+ * pms.unit_has_valid_permit), the one running longest when a unit has more than one.
+ */
+export function currentPermitNumbers(rows: PermitRow[], today: string): Map<string, string> {
+  const best = new Map<string, PermitRow>();
+  for (const r of rows) {
+    if (r.status !== "active" || r.issued_on > today || r.expires_on < today) continue;
+    const held = best.get(r.unit_id);
+    if (!held || r.expires_on > held.expires_on) best.set(r.unit_id, r);
+  }
+  return new Map([...best].map(([unit, r]) => [unit, r.permit_number]));
+}
+
 /** Null when the unit lacks what the website needs (the database refuses to publish those too). */
-export function toWebsiteHome(unit: UnitRow): WebsiteHome | null {
+export function toWebsiteHome(unit: UnitRow, permitNumber: string | null = null): WebsiteHome | null {
   const images = imagesOf(unit);
   const rate = num(unit.base_nightly_rate_aed);
   if (
@@ -122,5 +143,6 @@ export function toWebsiteHome(unit: UnitRow): WebsiteHome | null {
     lat: num(unit.website_lat),
     lng: num(unit.website_lng),
     mapsUrl: unit.website_maps_url,
+    permitNumber,
   };
 }
