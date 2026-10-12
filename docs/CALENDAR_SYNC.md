@@ -27,6 +27,10 @@ Airbnb listing ◀──import feed── /api/ical/<secret>.ics ◀── direc
 3. `npm run db:cron -- --url https://admin.dubairapidproperties.com`
 4. `npm run db:cron -- --status` shows the last runs and HTTP responses.
 
+The same command also schedules `/api/cron/website-rebuild` every hour (at
+:23), which rebuilds the D|R|P website through `WEBSITE_DEPLOY_HOOK_URL` so
+it shows Property Finder's current listings.
+
 ## What the sync does
 
 | On Airbnb | In D|R|P |
