@@ -37,6 +37,8 @@ export async function takeOver(formData: FormData) {
   const supabase = await createClient();
   const { data: existing } = await supabase.from("website_listings").select("id, status").eq("slug", slug).maybeSingle();
   if (existing) {
+    // Deleted from the website: only Restore brings it back.
+    if (existing.status === "removed") redirect("/website/listings/property-finder");
     if (mode === "hide" && existing.status !== "hidden") {
       await supabase.from("website_listings").update({ status: "hidden", updated_by: profile.id }).eq("id", existing.id);
       await rebuildWebsite();
@@ -65,4 +67,17 @@ export async function takeOver(formData: FormData) {
     redirect("/website/listings?saved=live");
   }
   redirect(`/website/listings/${data.id}`);
+}
+
+/** Undoes deleting a Property Finder listing: it shows on the website again, as on Property Finder. */
+export async function restoreListing(formData: FormData) {
+  const profile = await requireProfile();
+  if (!can(profile.role, "website.manage")) redirect("/website/listings/property-finder?error=permission");
+  const slug = String(formData.get("slug") ?? "");
+
+  const supabase = await createClient();
+  await supabase.from("website_listings").delete().eq("slug", slug).eq("status", "removed");
+  await rebuildWebsite();
+  revalidatePath("/website/listings/property-finder");
+  redirect("/website/listings?saved=live");
 }
