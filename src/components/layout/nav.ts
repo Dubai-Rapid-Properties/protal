@@ -63,6 +63,7 @@ export const STAFF_NAV: NavSection[] = [
     label: "Website",
     items: [
       { label: "Listings", href: "/website/listings", icon: "Globe", capability: "website.manage" },
+      { label: "Leads", href: "/leads", icon: "Inbox", capability: "leads.manage" },
       { label: "Holiday homes", href: "/website/holiday-homes", icon: "BedDouble", capability: "units.manage" },
     ],
   },
