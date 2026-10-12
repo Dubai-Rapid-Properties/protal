@@ -17,6 +17,7 @@ import {
   type ListingRow,
 } from "@/lib/listings";
 import { rebuildWebsite } from "@/lib/website";
+import { fetchPropertyFinderListings } from "./property-finder/actions";
 import { env } from "@/lib/env";
 import { MAX_PHOTO_BYTES, PHOTO_EXTENSIONS, storeWebsitePhoto } from "@/lib/website-photos";
 
@@ -172,12 +173,47 @@ function explain(error: { code?: string; message: string }): string {
   return error.message;
 }
 
+/** Whether a web address belongs to one of Property Finder's listings on the website. */
+async function isPropertyFinderListing(slug: string, ref: string | null): Promise<boolean> {
+  const list = await fetchPropertyFinderListings();
+  // The website did not answer: a Property Finder reference is the best guess.
+  if (!list) return Boolean(ref);
+  return list.some((l) => (l as { slug?: unknown })?.slug === slug);
+}
+
+/**
+ * Deletes a listing. A Property Finder listing's copy is not removed but
+ * marked "removed", keeping its address so the website leaves Property
+ * Finder's version off too: deleting it takes it off the website for good.
+ */
 export async function deleteListing(id: string): Promise<ListingState> {
   const profile = await requireEditor();
   if (!profile) return { error: NOT_ALLOWED };
   if (!z.string().uuid().safeParse(id).success) return { error: "Listing not found." };
 
   const supabase = await createClient();
+  const { data: current } = await supabase.from("website_listings").select("slug, ref, status, images").eq("id", id).maybeSingle();
+  if (!current) return { error: "Listing not found." };
+
+  if (await isPropertyFinderListing(current.slug, current.ref)) {
+    const { data: marked, error } = await supabase
+      .from("website_listings")
+      .update({ status: "removed", images: [], updated_by: profile.id })
+      .eq("id", id)
+      .select("id");
+    if (error) return { error: explain(error) };
+    if (!marked?.length) return { error: "This listing could not be deleted." };
+    const own = imagesOf(current)
+      .map((u) => ownPhotoPath(u, env.supabaseUrl))
+      .filter((p): p is string => Boolean(p));
+    if (own.length) await supabase.storage.from(PHOTO_BUCKET).remove(own);
+    // Off the website already when it was hidden; otherwise rebuild.
+    const rebuild = current.status === "hidden" ? null : await rebuildWebsite();
+    revalidatePath("/website/listings");
+    revalidatePath("/website/listings/property-finder");
+    redirect(`/website/listings?saved=${!rebuild ? "removed" : rebuild.started ? "live" : "pending"}`);
+  }
+
   const { data: removed, error } = await supabase
     .from("website_listings")
     .delete()

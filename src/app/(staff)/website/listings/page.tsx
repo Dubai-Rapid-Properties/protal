@@ -28,6 +28,11 @@ const SAVED: Record<string, { tone: "info" | "warning"; title: string; text: str
   },
   saved: { tone: "info", title: "Saved", text: "This listing is not on the website, so the website was left as it is." },
   deleted: { tone: "info", title: "Listing deleted", text: "It was not on the website." },
+  removed: {
+    tone: "info",
+    title: "Listing deleted",
+    text: "It stays off the website for good. To show it again, use Restore on the Property Finder listings page.",
+  },
 };
 
 export default async function WebsiteListingsPage({
@@ -47,6 +52,8 @@ export default async function WebsiteListingsPage({
     supabase
       .from("website_listings")
       .select("*")
+      // Deleted Property Finder listings: only their address is kept, on the Property Finder page.
+      .neq("status", "removed")
       .order("listed_at", { ascending: false })
       .order("created_at", { ascending: false }),
   ]);

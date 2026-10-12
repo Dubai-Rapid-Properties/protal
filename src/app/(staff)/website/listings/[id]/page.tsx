@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 import { requireCapability } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -24,6 +24,7 @@ export default async function EditListingPage({ params }: { params: Promise<{ id
     listingFormOptions(),
   ]);
   if (!listing) notFound();
+  if (listing.status === "removed") redirect("/website/listings/property-finder");
 
   return (
     <>
