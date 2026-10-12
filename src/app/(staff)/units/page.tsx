@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { DoorOpen, Plus, Search } from "lucide-react";
+import { DoorOpen, Download, Plus, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireCapability } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
@@ -119,12 +119,20 @@ export default async function UnitsPage({
           <>
             <ExportButton rows={exportRows} filename="drp-units" />
             {can(profile.role, "units.manage") && (
-              <Button asChild>
-                <Link href="/units/new">
-                  <Plus className="size-4" />
-                  Add unit
-                </Link>
-              </Button>
+              <>
+                <Button asChild variant="outline">
+                  <Link href="/units/from-airbnb">
+                    <Download className="size-4" />
+                    Import from Airbnb
+                  </Link>
+                </Button>
+                <Button asChild>
+                  <Link href="/units/new">
+                    <Plus className="size-4" />
+                    Add unit
+                  </Link>
+                </Button>
+              </>
             )}
           </>
         }
