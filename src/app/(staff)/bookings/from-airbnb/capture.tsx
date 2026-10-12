@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Callout } from "@/components/domain/shared";
 import { BookmarkletLink, CopyCode } from "@/components/domain/bookmarklet";
+import { AirbnbExtensionSetup } from "@/components/domain/airbnb-extension";
 import { FormError, FormSection, SelectField, SubmitBar, TextField } from "@/components/domain/form";
 import { formatDate } from "@/lib/dates";
 import { readAirbnbPage, saveAirbnbReservation, type Capture } from "./actions";
@@ -50,49 +51,58 @@ export function AirbnbCapture({ bookmarklet, units }: { bookmarklet: string; uni
       {capture && "error" in capture && <FormError message={capture.error} />}
       <Card>
         <CardContent className="space-y-3 p-5 text-sm">
-          <p className="font-medium">The &quot;Send to D|R|P&quot; button (once, on each computer)</p>
-          <ol className="list-decimal space-y-1 pl-5 text-[var(--muted-foreground)]">
-            <li>
-              Show the bookmarks bar: <strong>⌘ + Shift + B</strong> on a Mac (Ctrl + Shift + B on
-              Windows).
-            </li>
-            <li>Drag this button onto the bookmarks bar:</li>
-          </ol>
-          <BookmarkletLink code={bookmarklet} label="Send to D|R|P" />
-          <details className="rounded-md border border-[var(--border)] p-3">
-            <summary className="cursor-pointer font-medium">Dragging does not work? Add it by hand</summary>
-            <div className="mt-3 space-y-3">
-              <CopyCode code={bookmarklet} />
-              <div>
-                <p className="font-medium">Chrome</p>
+          <AirbnbExtensionSetup
+            fallback={
+              <>
                 <ol className="list-decimal space-y-1 pl-5 text-[var(--muted-foreground)]">
                   <li>
-                    Press <strong>⌘ + Option + B</strong> (Bookmark manager).
+                    Show the bookmarks bar: <strong>⌘ + Shift + B</strong> on a Mac (Ctrl + Shift + B on
+                    Windows).
                   </li>
-                  <li>
-                    Click <strong>Bookmarks bar</strong> on the left, then the <strong>⋮</strong>{" "}
-                    menu at the top right, then <strong>Add new bookmark</strong>.
-                  </li>
-                  <li>
-                    Name: <strong>Send to D|R|P</strong>. URL: paste (<strong>⌘ + V</strong>). Save.
-                  </li>
+                  <li>Drag this button onto the bookmarks bar:</li>
                 </ol>
-              </div>
-              <div>
-                <p className="font-medium">Safari</p>
-                <ol className="list-decimal space-y-1 pl-5 text-[var(--muted-foreground)]">
-                  <li>
-                    On this page press <strong>⌘ + D</strong>, choose <strong>Favorites</strong>, name
-                    it <strong>Send to D|R|P</strong> and click Add.
-                  </li>
-                  <li>
-                    Press <strong>⌘ + Option + B</strong>, right-click the new bookmark, choose{" "}
-                    <strong>Edit Address</strong> and paste (<strong>⌘ + V</strong>) over it.
-                  </li>
-                </ol>
-              </div>
-            </div>
-          </details>
+                <BookmarkletLink code={bookmarklet} label="Send to D|R|P" />
+                <details className="rounded-md border border-[var(--border)] p-3">
+                  <summary className="cursor-pointer font-medium">Dragging does not work? Add it by hand</summary>
+                  <div className="mt-3 space-y-3">
+                    <CopyCode code={bookmarklet} />
+                    <div>
+                      <p className="font-medium">Chrome</p>
+                      <ol className="list-decimal space-y-1 pl-5 text-[var(--muted-foreground)]">
+                        <li>
+                          Press <strong>⌘ + Option + B</strong> (Bookmark manager).
+                        </li>
+                        <li>
+                          Click <strong>Bookmarks bar</strong> on the left, then the <strong>⋮</strong>{" "}
+                          menu at the top right, then <strong>Add new bookmark</strong>.
+                        </li>
+                        <li>
+                          Name: <strong>Send to D|R|P</strong>. URL: paste (<strong>⌘ + V</strong>). Save.
+                        </li>
+                      </ol>
+                    </div>
+                    <div>
+                      <p className="font-medium">Safari</p>
+                      <ol className="list-decimal space-y-1 pl-5 text-[var(--muted-foreground)]">
+                        <li>
+                          On this page press <strong>⌘ + D</strong>, choose <strong>Favorites</strong>, name
+                          it <strong>Send to D|R|P</strong> and click Add.
+                        </li>
+                        <li>
+                          Press <strong>⌘ + Option + B</strong>, right-click the new bookmark, choose{" "}
+                          <strong>Edit Address</strong> and paste (<strong>⌘ + V</strong>) over it.
+                        </li>
+                      </ol>
+                    </div>
+                  </div>
+                </details>
+                <p className="text-[var(--muted-foreground)]">
+                  Then use <strong>Send to D|R|P</strong> on the bookmarks bar wherever the steps below say the D|R|P
+                  button.
+                </p>
+              </>
+            }
+          />
           <p className="font-medium">Using it</p>
           <ol className="list-decimal space-y-1 pl-5 text-[var(--muted-foreground)]">
             <li>Stay signed in to this portal.</li>
@@ -101,7 +111,8 @@ export function AirbnbCapture({ bookmarklet, units }: { bookmarklet: string; uni
               and the host payout are on screen.
             </li>
             <li>
-              Click <strong>Send to D|R|P</strong>. This page opens with the guest, dates and
+              Click the black <strong>D|R|P Import</strong> button at the bottom right of the page, then{" "}
+              <strong>Send reservation</strong>. This page opens with the guest, dates and
               price filled in: check them and save.
             </li>
           </ol>
