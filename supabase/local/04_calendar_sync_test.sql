@@ -234,7 +234,7 @@ declare
   airbnb integer;
 begin
   insert into availability_blocks (unit_id, start_date, end_date, reason)
-  values (pg_temp.unit('2807'), current_date + 90, current_date + 95, 'owner_stay');
+  values (pg_temp.unit('2807'), current_date + 150, current_date + 155, 'owner_stay');
 
   select string_agg(distinct kind, ',' order by kind) into kinds from ical_export_events(v_token);
   select count(*) into airbnb
