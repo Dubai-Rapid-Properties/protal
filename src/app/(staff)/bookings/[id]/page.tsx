@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/dates";
 import { INCIDENT_CATEGORY, SALES_CHANNEL, type IncidentCategory } from "@/lib/labels";
 import { BookingActions, DeleteBookingButton } from "./booking-actions";
+import { GuestDialog } from "./guest-dialog";
 import { PriceDialog } from "./price-dialog";
 
 export const metadata = { title: "Booking" };
@@ -145,8 +146,11 @@ export default async function BookingPage({
         </Card>
 
         <Card>
-          <CardHeader className="pb-3">
+          <CardHeader className="flex-row items-center justify-between gap-2 pb-3">
             <CardTitle className="text-base">Guest</CardTitle>
+            {can(profile.role, "bookings.manage") && (
+              <GuestDialog bookingId={b.id} isAirbnb={b.channel === "airbnb"} guest={b.guests} />
+            )}
           </CardHeader>
           <CardContent>
             <FieldGrid columns={2}>

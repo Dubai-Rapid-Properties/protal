@@ -947,3 +947,77 @@ export async function clearListingMatch(unitId: string): Promise<ActionState> {
   revalidatePath("/bookings/import");
   return { success: "Match removed." };
 }
+
+// ---------------------------------------------------------------------------
+// Guest on a booking
+// ---------------------------------------------------------------------------
+
+const guestSchema = z.object({
+  fullName: z.string().trim().min(2, "Enter the guest's name").max(150),
+  phone: z.string().trim().max(40).optional(),
+  email: z.union([z.literal(""), z.string().trim().email("Enter a valid email")]).optional(),
+  nationality: z.string().trim().max(60).optional(),
+  passport: z.string().trim().max(40).optional(),
+});
+
+/**
+ * Names the guest on a stay, or corrects their details. A stay synced from
+ * the Airbnb calendar arrives with no guest, so the first save creates one;
+ * after that the same guest record is edited (and so are their other stays).
+ * The earnings CSV import never replaces a guest already on a booking.
+ */
+export async function updateBookingGuest(
+  bookingId: string,
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "bookings.manage")) {
+    return { error: "You do not have permission to change bookings." };
+  }
+  if (!z.string().uuid().safeParse(bookingId).success) return { error: "Booking not found." };
+
+  const parsed = guestSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form and try again." };
+  const g = parsed.data;
+  const details = {
+    full_name: g.fullName,
+    phone: g.phone || null,
+    whatsapp: g.phone || null,
+    email: g.email || null,
+    nationality: g.nationality || null,
+    passport_number: g.passport || null,
+  };
+
+  const supabase = await createClient();
+  const { data: booking } = await supabase
+    .from("bookings")
+    .select("id, guest_id")
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (!booking) return { error: "Booking not found." };
+
+  if (booking.guest_id) {
+    const { data: changed, error } = await supabase
+      .from("guests")
+      .update(details)
+      .eq("id", booking.guest_id)
+      .select("id");
+    if (error) return { error: `Could not save the guest: ${error.message}` };
+    if (!changed?.length) return { error: "This guest could not be changed." };
+  } else {
+    const { data: guest, error } = await supabase.from("guests").insert(details).select("id").single();
+    if (error) return { error: `Could not save the guest: ${error.message}` };
+    const { data: linked, error: linkError } = await supabase
+      .from("bookings")
+      .update({ guest_id: guest.id })
+      .eq("id", bookingId)
+      .select("id");
+    if (linkError) return { error: explain(linkError) };
+    if (!linked?.length) return { error: "This booking could not be changed." };
+  }
+
+  revalidatePath("/bookings");
+  revalidatePath(`/bookings/${bookingId}`);
+  return { success: "Guest saved." };
+}
