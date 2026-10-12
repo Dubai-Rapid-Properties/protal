@@ -40,7 +40,7 @@ test("with no portal in either header, only the fallback applies", () => {
 });
 
 test("admin routes 404 on the owner host", () => {
-  for (const path of ["/dashboard", "/units", "/units/abc", "/finance", "/settings", "/setup", "/bookings"]) {
+  for (const path of ["/dashboard", "/units", "/units/abc", "/finance", "/settings", "/setup", "/bookings", "/incidents"]) {
     assert.equal(isPathAllowed("owner", path), false, path);
     assert.equal(isPathAllowed("admin", path), true, path);
   }

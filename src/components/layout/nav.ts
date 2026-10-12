@@ -44,6 +44,7 @@ export const STAFF_NAV: NavSection[] = [
     label: "Operations",
     items: [
       { label: "Repairs & complaints", href: "/maintenance", icon: "Wrench", capability: "maintenance.view" },
+      { label: "Guest incidents", href: "/incidents", icon: "TriangleAlert", capability: "incidents.view" },
     ],
   },
   {

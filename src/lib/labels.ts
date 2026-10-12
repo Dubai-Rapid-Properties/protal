@@ -186,6 +186,24 @@ export const TICKET_CATEGORIES: Record<TicketKind, Enums<"maintenance_category">
   complaint: ["noise", "cleaning", "neighbours", "security", "internet_tv", "service", "other"],
 };
 
+/** What a guest did to a unit (0033). Staff only - never shown to owners. */
+export const INCIDENT_CATEGORY = {
+  vomit: "Vomit / bodily fluids",
+  mess: "Excessive mess or stains",
+  damage: "Damage",
+  smoking: "Smoking",
+  party_noise: "Party / noise",
+  extra_guests: "Extra guests",
+  pets: "Pets",
+  missing_items: "Missing items",
+  rule_breach: "Other house-rule breach",
+  other: "Other",
+} as const;
+export type IncidentCategory = keyof typeof INCIDENT_CATEGORY;
+
+export const INCIDENT_STATUS = { open: "Open", resolved: "Resolved" } as const;
+export type IncidentStatus = keyof typeof INCIDENT_STATUS;
+
 export const INVOICE_STATUS: LabelMap<Enums<"invoice_status">> = {
   draft: "Draft",
   issued: "Issued",

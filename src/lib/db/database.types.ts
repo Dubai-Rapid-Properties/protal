@@ -940,6 +940,79 @@ export type Database = {
         };
         Relationships: [];
       };
+      guest_incidents: {
+        Row: {
+          id: string;
+          unit_id: string;
+          booking_id: string | null;
+          occurred_on: string;
+          category: string;
+          description: string;
+          charge_aed: number | null;
+          photo_paths: string[];
+          status: string;
+          resolution: string | null;
+          resolved_at: string | null;
+          reported_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          unit_id: string;
+          booking_id?: string | null;
+          occurred_on?: string;
+          category: string;
+          description: string;
+          charge_aed?: number | null;
+          photo_paths?: string[];
+          status?: string;
+          resolution?: string | null;
+          resolved_at?: string | null;
+          reported_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          unit_id?: string;
+          booking_id?: string | null;
+          occurred_on?: string;
+          category?: string;
+          description?: string;
+          charge_aed?: number | null;
+          photo_paths?: string[];
+          status?: string;
+          resolution?: string | null;
+          resolved_at?: string | null;
+          reported_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "guest_incidents_booking_id_fkey";
+            columns: ["booking_id"];
+            isOneToOne: false;
+            referencedRelation: "bookings";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "guest_incidents_reported_by_fkey";
+            columns: ["reported_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "guest_incidents_unit_id_fkey";
+            columns: ["unit_id"];
+            isOneToOne: false;
+            referencedRelation: "units";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       guests: {
         Row: {
           id: string;
@@ -4088,8 +4161,8 @@ export type Database = {
           website_maps_url: string | null;
           website_check_in: string;
           website_check_out: string;
-          website_beds: Json;
           website_seasons: Json;
+          website_beds: Json;
         };
         Insert: {
           id?: string;
@@ -4158,8 +4231,8 @@ export type Database = {
           website_maps_url?: string | null;
           website_check_in?: string;
           website_check_out?: string;
-          website_beds?: Json;
           website_seasons?: Json;
+          website_beds?: Json;
         };
         Update: {
           id?: string;
@@ -4228,8 +4301,8 @@ export type Database = {
           website_maps_url?: string | null;
           website_check_in?: string;
           website_check_out?: string;
-          website_beds?: Json;
           website_seasons?: Json;
+          website_beds?: Json;
         };
         Relationships: [
           {
