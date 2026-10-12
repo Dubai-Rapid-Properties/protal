@@ -4643,6 +4643,72 @@ export type Database = {
           },
         ];
       };
+      website_team: {
+        Row: {
+          id: string;
+          slug: string;
+          name: string;
+          role: string;
+          summary: string | null;
+          bio: string;
+          photo_url: string | null;
+          brn: string | null;
+          phone: string | null;
+          whatsapp: string | null;
+          email: string | null;
+          agent_names: string[];
+          show_on_about: boolean;
+          sort_order: number;
+          is_active: boolean;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          slug: string;
+          name: string;
+          role?: string;
+          summary?: string | null;
+          bio?: string;
+          photo_url?: string | null;
+          brn?: string | null;
+          phone?: string | null;
+          whatsapp?: string | null;
+          email?: string | null;
+          agent_names?: string[];
+          show_on_about?: boolean;
+          sort_order?: number;
+          is_active?: boolean;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          slug?: string;
+          name?: string;
+          role?: string;
+          summary?: string | null;
+          bio?: string;
+          photo_url?: string | null;
+          brn?: string | null;
+          phone?: string | null;
+          whatsapp?: string | null;
+          email?: string | null;
+          agent_names?: string[];
+          show_on_about?: boolean;
+          sort_order?: number;
+          is_active?: boolean;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       website_listings: {
         Row: {
           id: string;
