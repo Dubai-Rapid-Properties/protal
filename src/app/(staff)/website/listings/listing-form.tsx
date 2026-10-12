@@ -365,7 +365,13 @@ export function ListingForm({
       </FormSection>
 
       <FormSection title="Agent and references">
-        <TextField name="agent" label="Agent" list="listing-agents" defaultValue={listing?.agent ?? ""} />
+        <TextField
+          name="agent"
+          label="Agent"
+          list="listing-agents"
+          defaultValue={listing?.agent ?? ""}
+          hint="Pick someone from Website → Team: the listing shows their photo, BRN and Call / WhatsApp."
+        />
         <datalist id="listing-agents">
           {agents.map((a) => (
             <option key={a} value={a} />
