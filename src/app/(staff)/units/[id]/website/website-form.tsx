@@ -15,6 +15,8 @@ export interface WebsiteDefaults {
   published: boolean; title: string; slug: string; type: string; area: string; building: string; tag: string;
   description: string; highlights: string; houseRules: string; amenities: string[]; images: string[];
   lat: string; lng: string; mapsUrl: string; checkIn: string; checkOut: string; seasons: string;
+  /** Sleeping arrangements as text; null when the database doesn't have the column yet (migration 0030). */
+  beds: string | null;
 }
 
 export function WebsiteForm({ unitId, d }: { unitId: string; d: WebsiteDefaults }) {
@@ -175,6 +177,19 @@ export function WebsiteForm({ unitId, d }: { unitId: string; d: WebsiteDefaults 
         <TextField name="lng" label="Longitude" defaultValue={d.lng} placeholder="55.1403" />
         <TextField name="mapsUrl" label="Google Maps link" wide defaultValue={d.mapsUrl} placeholder="https://maps.app.goo.gl/…" />
       </FormSection>
+
+      {d.beds !== null ? (
+        <FormSection title="Where guests sleep" columns={1}>
+          <input type="hidden" name="bedsField" value="1" />
+          <TextAreaField
+            name="beds"
+            label="Rooms and beds"
+            rows={4}
+            defaultValue={d.beds}
+            hint='One room per line: Room | beds, e.g. "Bedroom 1 | 1 king bed" or "Living room | 1 sofa bed". Shown on the website as "Where you will sleep".'
+          />
+        </FormSection>
+      ) : null}
 
       <FormSection title="Seasonal rates" columns={1}>
         <TextAreaField

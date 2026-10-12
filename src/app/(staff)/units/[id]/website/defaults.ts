@@ -1,5 +1,5 @@
 import { imagesOf, type UnitRow } from "@/lib/website-homes";
-import { seasonsToText } from "@/lib/website-options";
+import { bedsToText, seasonsToText } from "@/lib/website-options";
 import type { WebsiteDefaults } from "./website-form";
 
 /** The unit's website details as the Website form shows them. */
@@ -23,5 +23,7 @@ export function websiteDefaults(u: UnitRow): WebsiteDefaults {
     checkIn: u.website_check_in ?? "15:00",
     checkOut: u.website_check_out ?? "11:00",
     seasons: seasonsToText(u.website_seasons),
+    // null until migration 0030 adds the column: the form then leaves the field out.
+    beds: "website_beds" in u ? bedsToText(u.website_beds) : null,
   };
 }
