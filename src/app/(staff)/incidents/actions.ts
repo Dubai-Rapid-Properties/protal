@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth/session";
@@ -35,7 +34,11 @@ function explain(error: { code?: string; message: string }): string {
   return error.message;
 }
 
-export async function createIncident(_prev: ActionState, formData: FormData): Promise<ActionState> {
+/**
+ * Saves a new incident and returns its id; the form then sends the chosen
+ * photos one at a time (addIncidentPhoto) and opens the incident.
+ */
+export async function createIncident(formData: FormData): Promise<ActionState & { id?: string }> {
   const profile = await requireProfile();
   if (!can(profile.role, "incidents.report")) return { error: "You do not have permission to report incidents." };
 
@@ -61,7 +64,7 @@ export async function createIncident(_prev: ActionState, formData: FormData): Pr
 
   revalidatePath("/incidents");
   if (v.bookingId) revalidatePath(`/bookings/${v.bookingId}`);
-  redirect(`/incidents/${data.id}`);
+  return { id: data.id };
 }
 
 const updateSchema = z.object({

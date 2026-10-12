@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { FormError, SelectField, SubmitBar, TextAreaField, TextField } from "@/components/domain/form";
 import { Button } from "@/components/ui/button";
 import { INCIDENT_STATUS, optionsFrom } from "@/lib/labels";
+import { shrinkPhoto } from "@/lib/shrink-photo";
 import { addIncidentPhoto, removeIncidentPhoto, updateIncident, type ActionState } from "../actions";
 
 export function IncidentOutcome({
@@ -51,29 +52,6 @@ export function IncidentOutcome({
   );
 }
 
-/**
- * Phone photos are often 3-8 MB, over the hosting platform's upload limit, so
- * each is redrawn at most 2000 px wide as a JPEG first. A photo the browser
- * cannot decode (HEIC outside Safari) is sent as it is.
- */
-async function shrink(file: File): Promise<File> {
-  if (!file.type.startsWith("image/") || file.size < 1_000_000) return file;
-  try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bitmap.width * scale);
-    canvas.height = Math.round(bitmap.height * scale);
-    canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
-    if (!blob) return file;
-    return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
-  } catch {
-    return file;
-  }
-}
-
 export function IncidentPhotos({
   incidentId,
   photos,
@@ -98,7 +76,7 @@ export function IncidentPhotos({
     for (const original of chosen) {
       try {
         const data = new FormData();
-        data.set("photo", await shrink(original));
+        data.set("photo", await shrinkPhoto(original));
         const result = await addIncidentPhoto(incidentId, data);
         if (result.error) toast.error(result.error);
         else added++;
