@@ -51,6 +51,9 @@ export type Capability =
   | "maintenance.raise"
   | "maintenance.assign"
   | "maintenance.approve_owner"
+  // Guest incidents (mess, damage ...): staff only, never owners
+  | "incidents.view"
+  | "incidents.report"
   // Documents & compliance
   | "documents.view"
   | "documents.upload"
@@ -73,6 +76,7 @@ const ALL: Capability[] = [
   "housekeeping.view", "housekeeping.manage",
   "finance.view", "finance.manage", "statements.view", "statements.issue",
   "maintenance.view", "maintenance.raise", "maintenance.assign", "maintenance.approve_owner",
+  "incidents.view", "incidents.report",
   "documents.view", "documents.upload", "compliance.view",
   "website.manage",
   "leads.manage", "messages.send",
@@ -90,6 +94,7 @@ export const CAPABILITIES: Record<Role, Capability[]> = {
     "housekeeping.view", "housekeeping.manage",
     "finance.view", "statements.view",
     "maintenance.view", "maintenance.raise", "maintenance.assign",
+    "incidents.view", "incidents.report",
     "documents.view", "documents.upload", "compliance.view",
     "website.manage",
     "leads.manage", "messages.send",
@@ -101,6 +106,7 @@ export const CAPABILITIES: Record<Role, Capability[]> = {
     "leases.view", "leases.manage",
     "bookings.view", "bookings.manage",
     "maintenance.view", "maintenance.raise",
+    "incidents.view", "incidents.report",
     "documents.view", "documents.upload",
     "website.manage",
     "leads.manage", "messages.send",
@@ -132,6 +138,7 @@ export const CAPABILITIES: Record<Role, Capability[]> = {
     "units.view",
     "housekeeping.view", "housekeeping.manage",
     "maintenance.view", "maintenance.raise", "maintenance.assign",
+    "incidents.view", "incidents.report",
     "documents.view", "documents.upload",
   ],
 
@@ -143,6 +150,7 @@ export const CAPABILITIES: Record<Role, Capability[]> = {
     "bookings.view",
     "finance.view", "finance.manage", "statements.view", "statements.issue",
     "maintenance.view",
+    "incidents.view",
     "documents.view", "documents.upload", "compliance.view",
     "audit.view",
   ],

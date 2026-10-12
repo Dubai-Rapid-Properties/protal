@@ -7144,3 +7144,270 @@ alter table units
     check (jsonb_typeof(website_beds) = 'array');
 
 comment on column units.website_beds is 'Sleeping arrangements shown on the Holiday Homes website: [{room, beds}].';
+
+-- ####################################################################
+-- ## 0031_website_listing_removed.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0031 Deleting a Property Finder listing from the website
+--
+-- Property Finder listings come from Property Finder, not from this table, so
+-- deleting the portal's copy of one used to bring Property Finder's version
+-- back on the website. "removed" keeps the web address here as a marker
+-- instead: /api/public/listings/hidden lists it and the website leaves the
+-- listing off, for good. The portal shows these only on the Property Finder
+-- page, where Restore deletes the marker.
+-- ============================================================================
+
+alter table website_listings drop constraint if exists website_listings_status_check;
+alter table website_listings add constraint website_listings_status_check
+  check (status in ('draft', 'published', 'hidden', 'removed'));
+
+comment on column website_listings.status is
+  'draft | published | hidden | removed (a Property Finder listing deleted from the website; only the address is used).';
+
+-- ####################################################################
+-- ## 0032_no_booking_over_holds.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0032 No booking over an owner stay, and no hold over a booking
+--
+-- bookings_no_overlap (0005) stops two stays sharing a night, but nothing in
+-- the database stopped a stay landing on an owner stay, a maintenance hold or
+-- a manual block. The staff forms check this themselves; the Airbnb and
+-- Booking.com feeds, the CSV import and confirming a request did not, so an
+-- owner could find a guest booked into their own stay.
+--
+-- Now both sides are refused in SQL, whatever writes them:
+--   * a live booking (tentative, confirmed, checked in) whose nights touch an
+--     owner stay, maintenance, housekeeping or manual block;
+--   * an owner stay, maintenance, housekeeping or manual block whose nights
+--     touch a live booking.
+-- Blocks mirrored from bookings ('booking') and dates closed on Airbnb
+-- ('channel_sync') are not holds: D|R|P closes Airbnb for its own direct
+-- guests, so a direct booking is expected there.
+--
+-- The refusal is a check_violation with a sentence naming the clash, so the
+-- feed sync reports it against that stay ("Airbnb stay ... : These dates
+-- overlap an owner stay ...") and the rest of the feed still imports.
+--
+-- Only new or moved stays and holds are checked: a stay that already overlaps
+-- from before this migration can still be checked in, out or cancelled.
+-- ============================================================================
+
+create or replace function pms.hold_label(p_reason block_reason)
+returns text
+language sql
+immutable
+as $$
+  select case p_reason
+    when 'owner_stay'   then 'an owner stay'
+    when 'maintenance'  then 'a maintenance block'
+    when 'housekeeping' then 'a housekeeping block'
+    else 'a blocked period'
+  end
+$$;
+
+-- One writer at a time per unit calendar, so a booking and a hold saved at
+-- the same moment cannot each miss the other.
+create or replace function pms.lock_unit_calendar(p_unit_id uuid)
+returns void
+language sql
+as $$
+  select pg_advisory_xact_lock(hashtext('unit-calendar:' || p_unit_id::text))
+$$;
+
+create or replace function pms.reject_booking_over_hold()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_hold availability_blocks%rowtype;
+begin
+  if new.status not in ('tentative','confirmed','checked_in') then
+    return new;
+  end if;
+  if tg_op = 'UPDATE'
+     and old.status in ('tentative','confirmed','checked_in')
+     and new.unit_id = old.unit_id
+     and new.check_in = old.check_in
+     and new.check_out = old.check_out then
+    return new;
+  end if;
+
+  perform pms.lock_unit_calendar(new.unit_id);
+
+  select * into v_hold
+    from availability_blocks ab
+   where ab.unit_id = new.unit_id
+     and ab.reason not in ('booking','channel_sync')
+     and daterange(ab.start_date, ab.end_date, '[)') && daterange(new.check_in, new.check_out, '[)')
+   order by ab.start_date
+   limit 1;
+
+  if found then
+    raise exception 'These dates overlap % on this unit (% to %). Move or remove it first.',
+      pms.hold_label(v_hold.reason),
+      to_char(v_hold.start_date, 'DD Mon YYYY'), to_char(v_hold.end_date, 'DD Mon YYYY')
+      using errcode = 'check_violation', constraint = 'bookings_no_overlap_holds';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists bookings_hold_gate on bookings;
+create trigger bookings_hold_gate
+  before insert or update of status, unit_id, check_in, check_out on bookings
+  for each row execute function pms.reject_booking_over_hold();
+
+create or replace function pms.reject_hold_over_booking()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_booking bookings%rowtype;
+begin
+  if new.reason in ('booking','channel_sync') then
+    return new;
+  end if;
+  if tg_op = 'UPDATE'
+     and old.reason not in ('booking','channel_sync')
+     and new.unit_id = old.unit_id
+     and new.start_date = old.start_date
+     and new.end_date = old.end_date then
+    return new;
+  end if;
+
+  perform pms.lock_unit_calendar(new.unit_id);
+
+  select * into v_booking
+    from bookings b
+   where b.unit_id = new.unit_id
+     and b.status in ('tentative','confirmed','checked_in')
+     and daterange(b.check_in, b.check_out, '[)') && daterange(new.start_date, new.end_date, '[)')
+   order by b.check_in
+   limit 1;
+
+  if found then
+    raise exception 'Booking % (% to %) is in these dates. Cancel or move it first.',
+      v_booking.booking_number,
+      to_char(v_booking.check_in, 'DD Mon YYYY'), to_char(v_booking.check_out, 'DD Mon YYYY')
+      using errcode = 'check_violation', constraint = 'availability_blocks_no_overlap_bookings';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists availability_blocks_booking_gate on availability_blocks;
+create trigger availability_blocks_booking_gate
+  before insert or update of reason, unit_id, start_date, end_date on availability_blocks
+  for each row execute function pms.reject_hold_over_booking();
+
+-- ####################################################################
+-- ## 0033_guest_incidents.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0033 Guest incidents (staff only)
+--
+-- A record of what a guest did to a unit: vomit or other mess, damage,
+-- smoking, a party, extra guests, missing items. Kept for cleaning charges,
+-- deposit deductions and Airbnb claims - and never shown to owners.
+--
+-- Repairs and complaints (maintenance_requests, 0019) are shared with the
+-- unit's owner by design. Incidents are not, so they get their own table
+-- whose every policy requires staff scoped to the unit; there is no owner,
+-- tenant or guest path to a row, and no owner view over it.
+--
+-- Photos live in the private 'documents' bucket under incident/<id>/... with
+-- no documents row: the bucket lets staff read any object and everyone else
+-- only objects a documents row grants them, so these stay staff only too.
+-- ============================================================================
+
+create table guest_incidents (
+  id            uuid primary key default gen_random_uuid(),
+  unit_id       uuid not null references units(id) on delete restrict,
+  booking_id    uuid references bookings(id) on delete set null,
+  occurred_on   date not null default current_date,
+  category      text not null check (category in (
+                  'vomit', 'mess', 'damage', 'smoking', 'party_noise',
+                  'extra_guests', 'pets', 'missing_items', 'rule_breach', 'other')),
+  description   text not null check (length(btrim(description)) between 3 and 4000),
+  charge_aed    numeric(10,2) check (charge_aed >= 0),
+  photo_paths   text[] not null default '{}',
+  status        text not null default 'open' check (status in ('open', 'resolved')),
+  resolution    text check (length(resolution) <= 2000),
+  resolved_at   timestamptz,
+  reported_by   uuid references profiles(id) on delete set null,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+comment on table guest_incidents is
+  'What a guest did to a unit (mess, damage, smoking ...). Staff only - never shown to owners.';
+comment on column guest_incidents.charge_aed is
+  'What D|R|P means to recover from the guest or their deposit, if anything.';
+comment on column guest_incidents.photo_paths is
+  'Object keys in the private documents bucket (incident/<id>/...).';
+
+create index guest_incidents_unit_idx on guest_incidents(unit_id, occurred_on desc);
+create index guest_incidents_booking_idx on guest_incidents(booking_id);
+create index guest_incidents_open_idx on guest_incidents(occurred_on desc) where status = 'open';
+
+create trigger guest_incidents_touch before update on guest_incidents
+  for each row execute function pms.touch_updated_at();
+
+-- The stay must be on the same unit, and resolving stamps the time.
+create or replace function pms.guest_incident_checks()
+returns trigger
+language plpgsql
+set search_path = public, pms
+as $$
+begin
+  if new.booking_id is not null
+     and not exists (select 1 from bookings b where b.id = new.booking_id and b.unit_id = new.unit_id) then
+    raise exception 'That booking is not on this unit' using errcode = 'check_violation';
+  end if;
+  if new.status = 'resolved' and (tg_op = 'INSERT' or old.status <> 'resolved') then
+    new.resolved_at := now();
+  elsif new.status = 'open' then
+    new.resolved_at := null;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger guest_incidents_checks
+  before insert or update on guest_incidents
+  for each row execute function pms.guest_incident_checks();
+
+alter table guest_incidents enable row level security;
+
+create policy guest_incidents_read on guest_incidents
+  for select to authenticated
+  using (pms.is_staff() and pms.staff_scoped_to_unit(unit_id));
+
+create policy guest_incidents_insert on guest_incidents
+  for insert to authenticated
+  with check (pms.is_staff() and pms.staff_scoped_to_unit(unit_id));
+
+create policy guest_incidents_update on guest_incidents
+  for update to authenticated
+  using (pms.is_staff() and pms.staff_scoped_to_unit(unit_id))
+  with check (pms.is_staff() and pms.staff_scoped_to_unit(unit_id));
+
+create policy guest_incidents_delete on guest_incidents
+  for delete to authenticated
+  using (pms.is_admin());
+
+revoke all on guest_incidents from public, anon;
+grant select, insert, update, delete on guest_incidents to authenticated;
+grant all on guest_incidents to service_role;

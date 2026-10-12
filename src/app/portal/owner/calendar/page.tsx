@@ -5,25 +5,25 @@ import { requireRole, getPortalSettings } from "@/lib/auth/session";
 import { PageHeader, EmptyState } from "@/components/domain/shared";
 import { BookingCalendar } from "@/components/domain/booking-calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { addDays, monthGrid, parseMonth } from "@/lib/calendar";
+import { monthSpanRange, parseMonth, parseMonthSpan } from "@/lib/calendar";
 
 export const metadata = { title: "Calendar" };
 
 /**
- * The month calendar of every holiday home the owner has, one under another,
- * all on the same month. Built only from the owner-safe views, so there is
+ * The calendar of every holiday home the owner has, one under another, all on
+ * the same months - three by default, up to a year ahead or back. Built only from the owner-safe views, so there is
  * no money here to hide.
  */
 export default async function OwnerCalendarPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<{ month?: string; months?: string }>;
 }) {
-  const { month: monthParam } = await searchParams;
+  const { month: monthParam, months: monthsParam } = await searchParams;
   const month = parseMonth(monthParam);
-  const grid = monthGrid(month);
-  const gridStart = grid[0][0];
-  const gridEnd = addDays(grid.at(-1)!.at(-1)!, 1);
+  const months = parseMonthSpan(monthsParam, 3);
+  const { start: gridStart, end: gridEnd } = monthSpanRange(month, months);
+  const calendarHref = (m: string, n: number) => `/portal/owner/calendar?month=${m}&months=${n}`;
 
   const supabase = await createClient();
   const [, settings, unitsResult] = await Promise.all([
@@ -87,6 +87,7 @@ export default async function OwnerCalendarPage({
               <CardContent className="p-4 sm:p-5">
                 <BookingCalendar
                   month={month}
+                  months={months}
                   stays={(staysResult.data ?? [])
                     .filter((b) => b.unit_id === unit.id)
                     .map((b) => ({
@@ -99,14 +100,15 @@ export default async function OwnerCalendarPage({
                   blocks={(blocksResult.data ?? [])
                     .filter((b) => b.unit_id === unit.id)
                     .map((b) => ({ id: b.id!, start: b.start_date!, end: b.end_date!, reason: b.reason! }))}
-                  monthHref={(m) => `/portal/owner/calendar?month=${m}`}
+                  monthHref={(m) => calendarHref(m, months)}
+                  spanHref={(n) => calendarHref(month, n)}
                 />
                 {units.length === 1 && (
                   <p className="mt-3 text-sm text-[var(--muted-foreground)]">
                     <Link href={`/portal/owner/units/${unit.id}`} className="underline underline-offset-2">
                       {unit.property_name} · {unit.unit_number}
                     </Link>{" "}
-                    - upcoming stays and property details
+                    - upcoming and past stays, and property details
                   </p>
                 )}
               </CardContent>

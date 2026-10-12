@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Plus } from "lucide-react";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
@@ -6,10 +7,11 @@ import { requireCapability } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
 import { Callout, Field, FieldGrid, Money, PageHeader } from "@/components/domain/shared";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { BookingStatusBadge, ChannelBadge } from "@/components/domain/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/dates";
-import { SALES_CHANNEL } from "@/lib/labels";
+import { INCIDENT_CATEGORY, SALES_CHANNEL, type IncidentCategory } from "@/lib/labels";
 import { BookingActions, DeleteBookingButton } from "./booking-actions";
 import { PriceDialog } from "./price-dialog";
 
@@ -38,11 +40,17 @@ export default async function BookingPage({
       .maybeSingle(),
   ]);
   if (!b) notFound();
-  const { data: unitOwner } = await supabase
-    .from("v_units_overview")
-    .select("owner_id, owner_name")
-    .eq("id", b.unit_id)
-    .maybeSingle();
+  const canSeeIncidents = can(profile.role, "incidents.view");
+  const [{ data: unitOwner }, { data: incidents }] = await Promise.all([
+    supabase.from("v_units_overview").select("owner_id, owner_name").eq("id", b.unit_id).maybeSingle(),
+    canSeeIncidents
+      ? supabase
+          .from("guest_incidents")
+          .select("id, occurred_on, category, description, charge_aed, status")
+          .eq("booking_id", b.id)
+          .order("occurred_on", { ascending: false })
+      : Promise.resolve({ data: null }),
+  ]);
 
   const unitLabel = `${b.units?.properties?.name ?? ""} · ${b.units?.unit_number ?? ""}`;
   // Airbnb's calendar feed carries no guest count; imports store a placeholder.
@@ -211,6 +219,51 @@ export default async function BookingPage({
             </div>
           </CardContent>
         </Card>
+
+        {canSeeIncidents && (
+          <Card className="lg:col-span-3">
+            <CardHeader className="flex-row items-center justify-between pb-3">
+              <div>
+                <CardTitle className="text-base">Guest incidents</CardTitle>
+                <p className="text-xs text-[var(--muted-foreground)]">Mess, damage, smoking ... Staff only, never shown to the owner.</p>
+              </div>
+              {can(profile.role, "incidents.report") && (
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/incidents/new?booking=${b.id}`}>
+                    <Plus className="size-4" />
+                    Report incident
+                  </Link>
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent className="text-sm">
+              {!incidents?.length ? (
+                <p className="text-[var(--muted-foreground)]">None reported for this stay.</p>
+              ) : (
+                <ul className="divide-y divide-[var(--border)]">
+                  {incidents.map((i) => (
+                    <li key={i.id} className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0">
+                      <div className="min-w-0">
+                        <Link href={`/incidents/${i.id}`} className="font-medium hover:underline">
+                          {INCIDENT_CATEGORY[i.category as IncidentCategory] ?? i.category}
+                        </Link>
+                        <p className="truncate text-xs text-[var(--muted-foreground)]">
+                          {formatDate(i.occurred_on)} · {i.description}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {i.charge_aed != null && <Money amount={i.charge_aed} />}
+                        <Badge variant={i.status === "open" ? "warning" : "muted"}>
+                          {i.status === "open" ? "Open" : "Resolved"}
+                        </Badge>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
     </>
   );

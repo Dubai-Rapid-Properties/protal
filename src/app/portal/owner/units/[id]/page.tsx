@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
@@ -5,36 +6,41 @@ import { requireRole, getPortalSettings } from "@/lib/auth/session";
 import { PageHeader, EmptyState, Field, FieldGrid } from "@/components/domain/shared";
 import { UnitStatusBadge } from "@/components/domain/status-badge";
 import { BookingCalendar } from "@/components/domain/booking-calendar";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { addDays, dubaiToday, monthGrid, parseMonth } from "@/lib/calendar";
+import { dubaiToday, monthSpanRange, parseMonth, parseMonthSpan } from "@/lib/calendar";
 import { formatDate } from "@/lib/dates";
 import { UNIT_KIND } from "@/lib/labels";
 import { OwnerBookingsTable } from "../../owner-bookings-table";
 
 export const metadata = { title: "Property calendar" };
 
+/** Past stays listed here before linking to the full bookings list. */
+const PAST_SHOWN = 20;
+
 export default async function OwnerUnitPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<{ month?: string; months?: string }>;
 }) {
   const { id } = await params;
-  const { month: monthParam } = await searchParams;
+  const { month: monthParam, months: monthsParam } = await searchParams;
   if (!z.string().uuid().safeParse(id).success) notFound();
 
   const month = parseMonth(monthParam);
-  const grid = monthGrid(month);
-  const gridStart = grid[0][0];
-  const gridEnd = addDays(grid.at(-1)!.at(-1)!, 1);
+  // Owners plan further ahead than one month, so the calendar opens on three.
+  const months = parseMonthSpan(monthsParam, 3);
+  const { start: gridStart, end: gridEnd } = monthSpanRange(month, months);
   const today = dubaiToday();
+  const calendarHref = (m: string, n: number) => `/portal/owner/units/${id}?month=${m}&months=${n}`;
 
   const supabase = await createClient();
 
   // All three are owner-safe views: a unit that is not the caller's simply
   // returns no row, so there is no ownership check to get wrong here.
-  const [, settings, unitResult, calendarResult, blocksResult, listResult] = await Promise.all([
+  const [, settings, unitResult, calendarResult, blocksResult, upcomingResult, pastResult] = await Promise.all([
     requireRole(["owner"]),
     getPortalSettings(),
     supabase.from("owner_units_view").select("*").eq("id", id).maybeSingle(),
@@ -54,9 +60,16 @@ export default async function OwnerUnitPage({
       .from("owner_bookings_view")
       .select("*")
       .eq("unit_id", id)
-      .gte("check_out", addDays(today, -90))
-      .order("check_in", { ascending: false })
+      .gt("check_out", today)
+      .order("check_in")
       .limit(50),
+    supabase
+      .from("owner_bookings_view")
+      .select("*", { count: "exact" })
+      .eq("unit_id", id)
+      .lte("check_out", today)
+      .order("check_in", { ascending: false })
+      .limit(PAST_SHOWN),
   ]);
 
   const unit = unitResult.data;
@@ -76,9 +89,9 @@ export default async function OwnerUnitPage({
     end: b.end_date!,
     reason: b.reason!,
   }));
-  const bookings = listResult.data ?? [];
-  const upcoming = bookings.filter((b) => b.check_out! > today).reverse();
-  const recent = bookings.filter((b) => b.check_out! <= today);
+  const upcoming = upcomingResult.data ?? [];
+  const past = pastResult.data ?? [];
+  const pastTotal = pastResult.count ?? past.length;
 
   return (
     <>
@@ -110,9 +123,11 @@ export default async function OwnerUnitPage({
         <CardContent className="p-4 sm:p-5">
           <BookingCalendar
             month={month}
+            months={months}
             stays={stays}
             blocks={blocks}
-            monthHref={(m) => `/portal/owner/units/${id}?month=${m}`}
+            monthHref={(m) => calendarHref(m, months)}
+            spanHref={(n) => calendarHref(month, n)}
           />
         </CardContent>
       </Card>
@@ -132,13 +147,20 @@ export default async function OwnerUnitPage({
         </CardContent>
       </Card>
 
-      {recent.length > 0 && (
+      {past.length > 0 && (
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Recent stays (last 90 days)</CardTitle>
+          <CardHeader className="flex-row items-center justify-between pb-3">
+            <CardTitle className="text-base">Past stays</CardTitle>
+            {pastTotal > past.length && (
+              <Button asChild variant="ghost" size="sm">
+                <Link href={`/portal/owner/bookings?view=past&unit=${id}`}>
+                  View all {pastTotal}
+                </Link>
+              </Button>
+            )}
           </CardHeader>
           <CardContent className="p-0">
-            <OwnerBookingsTable bookings={recent} showProperty={false} showGuestName={showGuestName} />
+            <OwnerBookingsTable bookings={past} showProperty={false} showGuestName={showGuestName} />
           </CardContent>
         </Card>
       )}

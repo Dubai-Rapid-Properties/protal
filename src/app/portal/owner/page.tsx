@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Building2, CalendarDays, Moon, ShieldCheck, Wrench } from "lucide-react";
+import { Building2, CalendarDays, History, Moon, ShieldCheck, Wrench } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireRole, getPortalSettings } from "@/lib/auth/session";
 import { PageHeader, StatCard, EmptyState, Money } from "@/components/domain/shared";
@@ -36,7 +36,7 @@ export default async function OwnerPortalPage() {
   const today = dubaiToday();
   const { start: monthStart, end: monthEnd } = monthRange(today.slice(0, 7));
 
-  const [profile, settings, unitsResult, bookingsResult, complianceResult, maintenanceResult] =
+  const [profile, settings, unitsResult, bookingsResult, pastResult, complianceResult, maintenanceResult] =
     await Promise.all([
       requireRole(["owner"]),
       getPortalSettings(),
@@ -46,6 +46,12 @@ export default async function OwnerPortalPage() {
         .select("*")
         .gte("check_out", monthStart)
         .order("check_in"),
+      supabase
+        .from("owner_bookings_view")
+        .select("*")
+        .lte("check_out", today)
+        .order("check_in", { ascending: false })
+        .limit(5),
       supabase
         .from("v_compliance_status")
         .select("*")
@@ -63,11 +69,12 @@ export default async function OwnerPortalPage() {
 
   const units = unitsResult.data ?? [];
   const bookings = bookingsResult.data ?? [];
+  const past = pastResult.data ?? [];
   const compliance = complianceResult.data ?? [];
   const tickets = maintenanceResult.data ?? [];
 
   const upcoming = bookings.filter((b) => b.check_out! > today);
-  const next30 = upcoming.filter((b) => b.check_in! <= addDays(today, 30));
+  const next90 = upcoming.filter((b) => b.check_in! <= addDays(today, 90));
   const nightsThisMonth = bookings.reduce(
     (sum, b) => sum + nightsWithin(b.check_in!, b.check_out!, monthStart, monthEnd),
     0
@@ -81,7 +88,7 @@ export default async function OwnerPortalPage() {
     <>
       <PageHeader
         title={`Welcome, ${(profile.full_name || "Owner").split(" ")[0]}`}
-        description="Your properties, upcoming stays and anything waiting on you."
+        description="Your properties, upcoming and past stays, and anything waiting on you."
       />
 
       {awaitingApproval.length > 0 && (
@@ -115,8 +122,8 @@ export default async function OwnerPortalPage() {
           href="/portal/owner/units"
         />
         <StatCard
-          label="Stays in next 30 days"
-          value={next30.length}
+          label="Stays in next 90 days"
+          value={next90.length}
           icon={<CalendarDays className="size-5" />}
           tone="brand"
           href="/portal/owner/bookings"
@@ -161,6 +168,26 @@ export default async function OwnerPortalPage() {
           )}
         </CardContent>
       </Card>
+
+      {past.length > 0 && (
+        <Card className="mt-6">
+          <CardHeader className="flex-row items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <History className="size-4" />
+              Past stays
+            </CardTitle>
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/portal/owner/bookings?view=past">View all</Link>
+            </Button>
+          </CardHeader>
+          <CardContent className="p-0">
+            <OwnerBookingsTable
+              bookings={past}
+              showGuestName={settings?.show_guest_first_name_to_owners ?? false}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <Card>

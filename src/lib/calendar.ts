@@ -70,6 +70,25 @@ export function monthGrid(month: string): string[][] {
   return weeks;
 }
 
+/** How many months a calendar can show at once. */
+export const MONTH_SPANS = [1, 3, 6, 12] as const;
+export type MonthSpan = (typeof MONTH_SPANS)[number];
+
+/** A month span from a query parameter, falling back to `fallback`. */
+export function parseMonthSpan(value: string | null | undefined, fallback: MonthSpan = 1): MonthSpan {
+  const n = Number(value);
+  return (MONTH_SPANS as readonly number[]).includes(n) ? (n as MonthSpan) : fallback;
+}
+
+/**
+ * The days a run of `span` month grids starting at `month` covers, as a
+ * half-open [start, end) range - what to fetch stays and blocks for.
+ */
+export function monthSpanRange(month: string, span: number): { start: string; end: string } {
+  const last = monthGrid(shiftMonth(month, span - 1));
+  return { start: monthGrid(month)[0][0], end: addDays(last.at(-1)!.at(-1)!, 1) };
+}
+
 /** Does a half-open [start, end) range cover the night of `day`? */
 export function coversNight(day: string, start: string, end: string): boolean {
   return start <= day && day < end;

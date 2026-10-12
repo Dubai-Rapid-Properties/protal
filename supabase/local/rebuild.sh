@@ -11,6 +11,6 @@ psql -d "$DB" -v ON_ERROR_STOP=1 -q -f supabase/local/00_shim.sql
 for f in supabase/migrations/0*.sql; do
   psql -d "$DB" -v ON_ERROR_STOP=1 -q -f "$f"
 done
-for f in supabase/local/0[2-9]_*test.sql; do
+for f in supabase/local/[0-9][0-9]_*test.sql; do
   psql -d "$DB" -v ON_ERROR_STOP=1 -f "$f"
 done
