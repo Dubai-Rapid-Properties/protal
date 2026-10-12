@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatAED } from "@/lib/money";
 import { fetchPropertyFinderListings, takeOver } from "./actions";
+import { ConfirmSubmitButton } from "./confirm-button";
 
 export const metadata = { title: "Property Finder listings" };
 
@@ -114,13 +115,30 @@ export default async function PropertyFinderListingsPage({
               )}
               <form action={takeOver} className="flex gap-2">
                 <input type="hidden" name="slug" value={l.slug} />
-                <Button type="submit" name="mode" value="edit" size="sm">
-                  {mine ? "Open" : "Edit"}
-                </Button>
-                {mine?.status !== "hidden" && (
-                  <Button type="submit" name="mode" value="hide" size="sm" variant="outline">
-                    Hide
+                {mine ? (
+                  <Button type="submit" name="mode" value="edit" size="sm">
+                    Open
                   </Button>
+                ) : (
+                  <ConfirmSubmitButton
+                    name="mode"
+                    value="edit"
+                    size="sm"
+                    message={`Edit "${l.title}"? A copy is saved here and shown on the website straight away instead of Property Finder's, and it no longer follows changes made on Property Finder. To undo, delete the copy under Website listings.`}
+                  >
+                    Edit
+                  </ConfirmSubmitButton>
+                )}
+                {mine?.status !== "hidden" && (
+                  <ConfirmSubmitButton
+                    name="mode"
+                    value="hide"
+                    size="sm"
+                    variant="outline"
+                    message={`Hide "${l.title}" from the website? Property Finder itself is not changed.`}
+                  >
+                    Hide
+                  </ConfirmSubmitButton>
                 )}
               </form>
             </Card>
