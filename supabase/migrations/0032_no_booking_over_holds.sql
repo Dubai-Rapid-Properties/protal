@@ -1,5 +1,5 @@
 -- ============================================================================
--- D|R|P PMS - 0031 No booking over an owner stay, and no hold over a booking
+-- D|R|P PMS - 0032 No booking over an owner stay, and no hold over a booking
 --
 -- bookings_no_overlap (0005) stops two stays sharing a night, but nothing in
 -- the database stopped a stay landing on an owner stay, a maintenance hold or

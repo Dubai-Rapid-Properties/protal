@@ -1,5 +1,5 @@
 -- ============================================================================
--- D|R|P PMS - No booking over an owner stay, no hold over a booking (0031)
+-- D|R|P PMS - No booking over an owner stay, no hold over a booking (0032)
 --
 -- Runs after 02-09 and reuses unit 2807 (owner B, valid DET permit). Its
 -- dates sit far ahead of the other suites' fixtures, and it removes what it
@@ -107,7 +107,7 @@ begin
   end if;
   raise notice 'TEST 77 PASS  Airbnb stay over an owner stay not imported and reported';
 
-  -- TEST 78 - a stay that overlapped before 0031 can still be checked in.
+  -- TEST 78 - a stay that overlapped before 0032 can still be checked in.
   alter table bookings disable trigger bookings_hold_gate;
   insert into bookings (unit_id, channel, status, check_in, check_out, adults)
   values (v_unit, 'airbnb', 'confirmed', d0 + 11, d0 + 13, 2) returning id into v_old;
