@@ -6,9 +6,11 @@ import {
   dubaiToday,
   monthGrid,
   monthRange,
+  monthSpanRange,
   nightsBetween,
   nightsWithin,
   parseMonth,
+  parseMonthSpan,
   rangesOverlap,
   shiftMonth,
   uncoveredRanges,
@@ -28,6 +30,20 @@ test("parseMonth rejects junk and defaults to the Dubai month", () => {
   assert.equal(parseMonth("'; drop table", now), "2026-10");
   assert.equal(parseMonth(undefined, now), "2026-10");
   assert.equal(dubaiToday(now), "2026-10-01");
+});
+
+test("parseMonthSpan only accepts the offered spans", () => {
+  assert.equal(parseMonthSpan("3"), 3);
+  assert.equal(parseMonthSpan("12"), 12);
+  assert.equal(parseMonthSpan("4"), 1);
+  assert.equal(parseMonthSpan("1e1", 3), 3);
+  assert.equal(parseMonthSpan(undefined, 3), 3);
+});
+
+test("monthSpanRange covers every grid in the span", () => {
+  assert.deepEqual(monthSpanRange("2026-09", 1), { start: "2026-08-31", end: "2026-10-05" });
+  // Sep-Nov 2026: 30 Nov is a Monday, so the last grid runs to Sun 6 Dec.
+  assert.deepEqual(monthSpanRange("2026-09", 3), { start: "2026-08-31", end: "2026-12-07" });
 });
 
 test("monthGrid starts on Monday and covers the whole month", () => {

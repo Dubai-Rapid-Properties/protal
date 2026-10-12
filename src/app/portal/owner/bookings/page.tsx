@@ -103,7 +103,7 @@ export default async function OwnerBookingsPage({
 
       {rows.length === 0 ? (
         <EmptyState
-          title={view === "past" ? "No past stays" : "No upcoming stays"}
+          title={view === "past" ? "No past stays" : view === "all" ? "No stays yet" : "No upcoming stays"}
           description="Confirmed bookings on your properties appear here."
           icon={<CalendarDays className="size-8" />}
         />
