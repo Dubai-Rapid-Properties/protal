@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Callout } from "@/components/domain/shared";
 import { FormError, FormSection } from "@/components/domain/form";
 import { BookmarkletLink, CopyCode } from "@/components/domain/bookmarklet";
+import { AirbnbExtensionSetup } from "@/components/domain/airbnb-extension";
 import { collectAirbnbListing } from "@/lib/airbnb/listing-collect";
 import { MAX_IMPORTED_PHOTOS, mergeListing } from "@/lib/airbnb/listing-page";
 import { hasPrices, isHostPage } from "@/lib/airbnb/listing-prices";
@@ -123,48 +124,57 @@ export function ListingImport({
       {capture && "error" in capture && <FormError message={capture.error} />}
       <Card>
         <CardContent className="space-y-3 p-5 text-sm">
-          <p className="font-medium">The &quot;Import listing to D|R|P&quot; button (once, on each computer)</p>
-          <ol className="list-decimal space-y-1 pl-5 text-[var(--muted-foreground)]">
-            <li>
-              Show the bookmarks bar: <strong>⌘ + Shift + B</strong> on a Mac (Ctrl + Shift + B on Windows).
-            </li>
-            <li>Drag this button onto the bookmarks bar:</li>
-          </ol>
-          <BookmarkletLink code={bookmarklet} label="Import listing to D|R|P" />
-          <details className="rounded-md border border-[var(--border)] p-3">
-            <summary className="cursor-pointer font-medium">Dragging does not work? Add it by hand</summary>
-            <div className="mt-3 space-y-3">
-              <CopyCode code={bookmarklet} />
-              <div>
-                <p className="font-medium">Chrome</p>
+          <AirbnbExtensionSetup
+            fallback={
+              <>
                 <ol className="list-decimal space-y-1 pl-5 text-[var(--muted-foreground)]">
                   <li>
-                    Press <strong>⌘ + Option + B</strong> (Bookmark manager).
+                    Show the bookmarks bar: <strong>⌘ + Shift + B</strong> on a Mac (Ctrl + Shift + B on Windows).
                   </li>
-                  <li>
-                    Click <strong>Bookmarks bar</strong> on the left, then the <strong>⋮</strong> menu at the top
-                    right, then <strong>Add new bookmark</strong>.
-                  </li>
-                  <li>
-                    Name: <strong>Import listing to D|R|P</strong>. URL: paste (<strong>⌘ + V</strong>). Save.
-                  </li>
+                  <li>Drag this button onto the bookmarks bar:</li>
                 </ol>
-              </div>
-              <div>
-                <p className="font-medium">Safari</p>
-                <ol className="list-decimal space-y-1 pl-5 text-[var(--muted-foreground)]">
-                  <li>
-                    Bookmark any page with <strong>⌘ + D</strong>, into <strong>Favourites</strong>, named{" "}
-                    <strong>Import listing to D|R|P</strong>.
-                  </li>
-                  <li>
-                    Right-click the new bookmark in the favourites bar, choose <strong>Edit Address</strong> and paste
-                    (<strong>⌘ + V</strong>) over it.
-                  </li>
-                </ol>
-              </div>
-            </div>
-          </details>
+                <BookmarkletLink code={bookmarklet} label="Import listing to D|R|P" />
+                <details className="rounded-md border border-[var(--border)] p-3">
+                  <summary className="cursor-pointer font-medium">Dragging does not work? Add it by hand</summary>
+                  <div className="mt-3 space-y-3">
+                    <CopyCode code={bookmarklet} />
+                    <div>
+                      <p className="font-medium">Chrome</p>
+                      <ol className="list-decimal space-y-1 pl-5 text-[var(--muted-foreground)]">
+                        <li>
+                          Press <strong>⌘ + Option + B</strong> (Bookmark manager).
+                        </li>
+                        <li>
+                          Click <strong>Bookmarks bar</strong> on the left, then the <strong>⋮</strong> menu at the top
+                          right, then <strong>Add new bookmark</strong>.
+                        </li>
+                        <li>
+                          Name: <strong>Import listing to D|R|P</strong>. URL: paste (<strong>⌘ + V</strong>). Save.
+                        </li>
+                      </ol>
+                    </div>
+                    <div>
+                      <p className="font-medium">Safari</p>
+                      <ol className="list-decimal space-y-1 pl-5 text-[var(--muted-foreground)]">
+                        <li>
+                          Bookmark any page with <strong>⌘ + D</strong>, into <strong>Favourites</strong>, named{" "}
+                          <strong>Import listing to D|R|P</strong>.
+                        </li>
+                        <li>
+                          Right-click the new bookmark in the favourites bar, choose <strong>Edit Address</strong> and paste
+                          (<strong>⌘ + V</strong>) over it.
+                        </li>
+                      </ol>
+                    </div>
+                  </div>
+                </details>
+                <p className="text-[var(--muted-foreground)]">
+                  Then use <strong>Import listing to D|R|P</strong> on the bookmarks bar wherever the steps below say
+                  the D|R|P button.
+                </p>
+              </>
+            }
+          />
           <p className="font-medium">Using it</p>
           <ol className="list-decimal space-y-1 pl-5 text-[var(--muted-foreground)]">
             <li>Stay signed in to this portal.</li>
@@ -174,7 +184,8 @@ export function ListingImport({
               details.
             </li>
             <li>
-              Click <strong>Import listing to D|R|P</strong>. This page opens with the listing: pick the unit and the
+              Click the black <strong>D|R|P Import</strong> button at the bottom right of the page, then{" "}
+              <strong>Import listing</strong>. This page opens with the listing: pick the unit and the
               photos, and the unit&apos;s Website form opens filled in. Check it and save - nothing goes on the
               website until you tick <strong>Published</strong> and save.
             </li>
@@ -183,16 +194,17 @@ export function ListingImport({
           <ol className="list-decimal space-y-1 pl-5 text-[var(--muted-foreground)]">
             <li>
               On Airbnb open <strong>Listings</strong> → the listing → <strong>Pricing</strong> (nightly and weekend
-              price, discounts, cleaning fee) and click <strong>Import listing to D|R|P</strong> there. Each price
+              price, discounts, cleaning fee) and click <strong>D|R|P Import</strong> → <strong>Import listing</strong>{" "}
+              there. Each price
               shows what changes on the unit; check and save. Only AED prices are taken.
             </li>
             <li>
-              For seasonal rates, click it on the listing&apos;s <strong>Calendar</strong> too: where Airbnb labels
+              For seasonal rates, do the same on the listing&apos;s <strong>Calendar</strong>: where Airbnb labels
               the days with their prices, the coming nights become the website&apos;s seasons.
             </li>
             <li>
               This is a one-click refresh, not a live sync: when prices change on Airbnb (Smart Pricing included),
-              click the button again.
+              import again.
             </li>
           </ol>
         </CardContent>
