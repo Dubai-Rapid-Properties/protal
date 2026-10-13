@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
-import { CalendarX2, Pencil, X } from "lucide-react";
+import { CalendarX2, Pencil, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,7 +33,20 @@ function Submit({ label, pending: pendingLabel }: { label: string; pending: stri
   );
 }
 
-export function BlockDatesDialog({ unitId }: { unitId: string }) {
+/**
+ * Blocks dates on the unit. With `startDate`/`endDate` it opens as "Owner
+ * stay" for those nights - the way an Airbnb block is recorded as the owner's.
+ */
+export function BlockDatesDialog({
+  unitId,
+  startDate,
+  endDate,
+}: {
+  unitId: string;
+  startDate?: string;
+  endDate?: string;
+}) {
+  const forOwner = Boolean(startDate && endDate);
   const [open, setOpen] = React.useState(false);
   const [state, action] = useActionState<ActionState, FormData>(blockDates, {});
 
@@ -47,18 +60,26 @@ export function BlockDatesDialog({ unitId }: { unitId: string }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          <CalendarX2 className="size-4" />
-          Block dates
-        </Button>
+        {forOwner ? (
+          <Button size="sm" variant="outline">
+            <UserRound className="size-4" />
+            Owner stay
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline">
+            <CalendarX2 className="size-4" />
+            Block dates
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <form action={action}>
           <DialogHeader>
-            <DialogTitle>Block dates</DialogTitle>
+            <DialogTitle>{forOwner ? "Owner stay" : "Block dates"}</DialogTitle>
             <DialogDescription>
               The unit cannot be booked for these nights. The end date is the first
               night that is free again, like a check-out date.
+              {forOwner && " Shorten the dates if only part of the Airbnb block is the owner's."}
             </DialogDescription>
           </DialogHeader>
           <div className="my-4 grid gap-4 sm:grid-cols-2">
@@ -66,8 +87,8 @@ export function BlockDatesDialog({ unitId }: { unitId: string }) {
             <input type="hidden" name="unitId" value={unitId} />
             <SelectField name="reason" label="Reason" required defaultValue="owner_stay" options={REASONS} />
             <div />
-            <TextField name="startDate" label="From" type="date" required />
-            <TextField name="endDate" label="Until" type="date" required />
+            <TextField name="startDate" label="From" type="date" required defaultValue={startDate} />
+            <TextField name="endDate" label="Until" type="date" required defaultValue={endDate} />
             <TextField name="note" label="Note" wide placeholder="Owner family visit" />
           </div>
           <DialogFooter>

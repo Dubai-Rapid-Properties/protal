@@ -182,7 +182,12 @@ function MonthGrid({
           {week.map((day, i) => {
             const inMonth = day.startsWith(month);
             const stay = stays.find((s) => coversNight(day, s.checkIn, s.checkOut));
-            const block = stay ? undefined : blocks.find((b) => coversNight(day, b.start, b.end));
+            // An owner stay or other hold recorded inside an Airbnb block names
+            // what the Airbnb block only calls "not available".
+            const block = stay
+              ? undefined
+              : (blocks.find((b) => b.reason !== "channel_sync" && coversNight(day, b.start, b.end)) ??
+                blocks.find((b) => coversNight(day, b.start, b.end)));
             const checkout = stays.find((s) => s.checkOut === day);
             const isStart = stay && (stay.checkIn === day || i === 0);
             const title = stay
