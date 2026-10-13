@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth/session";
@@ -67,4 +68,19 @@ export async function updateLead(leadId: string, _prev: ActionState, formData: F
   revalidatePath("/leads");
   revalidatePath(`/leads/${leadId}`);
   return { success: "Saved." };
+}
+
+/** Removes a lead and its timeline for good, e.g. a test or spam enquiry. */
+export async function deleteLead(leadId: string): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "leads.manage")) return { error: "You do not have permission to delete leads." };
+  if (!z.string().uuid().safeParse(leadId).success) return { error: "Lead not found." };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("leads").delete().eq("id", leadId).select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "This lead could not be deleted." };
+
+  revalidatePath("/leads");
+  redirect("/leads?deleted=1");
 }
