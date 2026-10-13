@@ -1,5 +1,6 @@
 import { Sidebar } from "@/components/layout/sidebar";
 import { HistoryNav } from "@/components/layout/history-nav";
+import { AirbnbBlockAlarmBanner } from "@/components/layout/airbnb-block-alarm";
 import { STAFF_NAV } from "@/components/layout/nav";
 import { requirePortalProfile } from "@/lib/auth/session";
 import { unreadNotificationCount } from "@/lib/notify/count";
@@ -29,6 +30,7 @@ export default async function StaffLayout({
         badges={{ "/notifications": unread }}
       />
       <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
+        {profile.role === "super_admin" && <AirbnbBlockAlarmBanner />}
         <HistoryNav />
         {children}
       </main>

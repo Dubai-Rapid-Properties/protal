@@ -254,6 +254,8 @@ export type Database = {
           last_seen_in_feed_at: string | null;
           import_source: string | null;
           website_ref: string | null;
+          airbnb_block_done_at: string | null;
+          airbnb_block_done_by: string | null;
         };
         Insert: {
           id?: string;
@@ -296,6 +298,8 @@ export type Database = {
           last_seen_in_feed_at?: string | null;
           import_source?: string | null;
           website_ref?: string | null;
+          airbnb_block_done_at?: string | null;
+          airbnb_block_done_by?: string | null;
         };
         Update: {
           id?: string;
@@ -338,8 +342,17 @@ export type Database = {
           last_seen_in_feed_at?: string | null;
           import_source?: string | null;
           website_ref?: string | null;
+          airbnb_block_done_at?: string | null;
+          airbnb_block_done_by?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "bookings_airbnb_block_done_by_fkey";
+            columns: ["airbnb_block_done_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "bookings_created_by_fkey";
             columns: ["created_by"];
@@ -5163,6 +5176,14 @@ export type Database = {
         Returns: unknown;
       };
       link_channel_stay: {
+        Args: Record<string, unknown>;
+        Returns: unknown;
+      };
+      mark_airbnb_blocked: {
+        Args: Record<string, unknown>;
+        Returns: unknown;
+      };
+      pending_airbnb_blocks: {
         Args: Record<string, unknown>;
         Returns: unknown;
       };
