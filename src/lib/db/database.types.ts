@@ -363,6 +363,48 @@ export type Database = {
           },
         ];
       };
+      channel_block_dismissals: {
+        Row: {
+          unit_id: string;
+          ical_uid: string;
+          start_date: string;
+          end_date: string;
+          dismissed_by: string | null;
+          dismissed_at: string;
+        };
+        Insert: {
+          unit_id: string;
+          ical_uid: string;
+          start_date: string;
+          end_date: string;
+          dismissed_by?: string | null;
+          dismissed_at?: string;
+        };
+        Update: {
+          unit_id?: string;
+          ical_uid?: string;
+          start_date?: string;
+          end_date?: string;
+          dismissed_by?: string | null;
+          dismissed_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "channel_block_dismissals_dismissed_by_fkey";
+            columns: ["dismissed_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "channel_block_dismissals_unit_id_fkey";
+            columns: ["unit_id"];
+            isOneToOne: false;
+            referencedRelation: "units";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       channel_listings: {
         Row: {
           id: string;
@@ -4643,72 +4685,6 @@ export type Database = {
           },
         ];
       };
-      website_team: {
-        Row: {
-          id: string;
-          slug: string;
-          name: string;
-          role: string;
-          summary: string | null;
-          bio: string;
-          photo_url: string | null;
-          brn: string | null;
-          phone: string | null;
-          whatsapp: string | null;
-          email: string | null;
-          agent_names: string[];
-          show_on_about: boolean;
-          sort_order: number;
-          is_active: boolean;
-          created_by: string | null;
-          updated_by: string | null;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          slug: string;
-          name: string;
-          role?: string;
-          summary?: string | null;
-          bio?: string;
-          photo_url?: string | null;
-          brn?: string | null;
-          phone?: string | null;
-          whatsapp?: string | null;
-          email?: string | null;
-          agent_names?: string[];
-          show_on_about?: boolean;
-          sort_order?: number;
-          is_active?: boolean;
-          created_by?: string | null;
-          updated_by?: string | null;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          slug?: string;
-          name?: string;
-          role?: string;
-          summary?: string | null;
-          bio?: string;
-          photo_url?: string | null;
-          brn?: string | null;
-          phone?: string | null;
-          whatsapp?: string | null;
-          email?: string | null;
-          agent_names?: string[];
-          show_on_about?: boolean;
-          sort_order?: number;
-          is_active?: boolean;
-          created_by?: string | null;
-          updated_by?: string | null;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Relationships: [];
-      };
       website_listings: {
         Row: {
           id: string;
@@ -4820,6 +4796,87 @@ export type Database = {
           },
           {
             foreignKeyName: "website_listings_updated_by_fkey";
+            columns: ["updated_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      website_team: {
+        Row: {
+          id: string;
+          slug: string;
+          name: string;
+          role: string;
+          summary: string | null;
+          bio: string;
+          photo_url: string | null;
+          brn: string | null;
+          phone: string | null;
+          whatsapp: string | null;
+          email: string | null;
+          agent_names: string[];
+          show_on_about: boolean;
+          sort_order: number;
+          is_active: boolean;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          slug: string;
+          name: string;
+          role?: string;
+          summary?: string | null;
+          bio?: string;
+          photo_url?: string | null;
+          brn?: string | null;
+          phone?: string | null;
+          whatsapp?: string | null;
+          email?: string | null;
+          agent_names?: string[];
+          show_on_about?: boolean;
+          sort_order?: number;
+          is_active?: boolean;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          slug?: string;
+          name?: string;
+          role?: string;
+          summary?: string | null;
+          bio?: string;
+          photo_url?: string | null;
+          brn?: string | null;
+          phone?: string | null;
+          whatsapp?: string | null;
+          email?: string | null;
+          agent_names?: string[];
+          show_on_about?: boolean;
+          sort_order?: number;
+          is_active?: boolean;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "website_team_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "website_team_updated_by_fkey";
             columns: ["updated_by"];
             isOneToOne: false;
             referencedRelation: "profiles";
@@ -4980,6 +5037,10 @@ export type Database = {
         Returns: unknown;
       };
       current_profile: {
+        Args: Record<string, unknown>;
+        Returns: unknown;
+      };
+      dismiss_channel_block: {
         Args: Record<string, unknown>;
         Returns: unknown;
       };

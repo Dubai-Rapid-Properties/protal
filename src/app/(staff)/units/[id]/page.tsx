@@ -683,8 +683,7 @@ export default async function UnitDetailPage({
                               note={noteOf(h.note)}
                               label={`${h.reason === "channel_sync" ? "Blocked on Airbnb" : "Block"}, ${formatDate(h.start_date)} → ${formatDate(h.end_date)}`}
                             />
-                            {/* An Airbnb block comes back with the next sync: remove it on Airbnb. */}
-                            {h.reason !== "channel_sync" && <RemoveBlockButton blockId={h.id} unitId={unit.id} />}
+                            <RemoveBlockButton blockId={h.id} unitId={unit.id} airbnb={h.reason === "channel_sync"} />
                           </div>
                         )}
                       </li>

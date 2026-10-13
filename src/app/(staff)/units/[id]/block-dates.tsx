@@ -100,13 +100,25 @@ export function BlockDatesDialog({
   );
 }
 
-export function RemoveBlockButton({ blockId, unitId }: { blockId: string; unitId: string }) {
+export function RemoveBlockButton({
+  blockId,
+  unitId,
+  airbnb = false,
+}: {
+  blockId: string;
+  unitId: string;
+  /** A "Blocked on Airbnb" period: removed from the portal only. */
+  airbnb?: boolean;
+}) {
   // Awaited directly rather than through useActionState: removing the block
   // removes this row, and the toast must still fire after it has gone.
   const [pending, startTransition] = React.useTransition();
 
   const remove = () => {
-    if (!confirm("Remove this block? The dates become bookable again.")) return;
+    const question = airbnb
+      ? "Remove this Airbnb block from the portal?\n\nThe dates stay closed on Airbnb itself - open them there if they should be bookable. The block comes back only if Airbnb changes its dates."
+      : "Remove this block? The dates become bookable again.";
+    if (!confirm(question)) return;
     const formData = new FormData();
     formData.set("blockId", blockId);
     formData.set("unitId", unitId);

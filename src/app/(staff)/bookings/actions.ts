@@ -530,6 +530,22 @@ export async function removeBlock(
   if (!parsed.success) return { error: "Block not found." };
 
   const supabase = await createClient();
+  const { data: block } = await supabase
+    .from("availability_blocks")
+    .select("reason")
+    .eq("id", parsed.data.blockId)
+    .maybeSingle();
+  if (!block) return { error: "This block could not be removed." };
+
+  // A "Blocked on Airbnb" period is removed and remembered, so the next sync
+  // does not bring it back (0035). It stays closed on Airbnb itself.
+  if (block.reason === "channel_sync") {
+    const { error } = await supabase.rpc("dismiss_channel_block", { p_block_id: parsed.data.blockId });
+    if (error) return { error: error.message };
+    revalidatePath(`/units/${parsed.data.unitId}`);
+    return { success: "Airbnb block removed from the portal. The dates are still closed on Airbnb." };
+  }
+
   // Booking blocks follow their booking; only manual holds are removed here.
   const { data: removed, error } = await supabase
     .from("availability_blocks")
