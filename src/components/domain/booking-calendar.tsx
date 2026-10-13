@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   MONTH_SPANS,
+  addDays,
   coversNight,
   dubaiToday,
   monthGrid,
@@ -54,6 +55,12 @@ const sourceTone = (source: Enums<"sales_channel">) =>
 
 const BLOCK_TONE =
   "text-[var(--muted-foreground)] bg-[repeating-linear-gradient(135deg,var(--muted),var(--muted)_6px,transparent_6px,transparent_12px)]";
+const OWNER_TONE = "bg-violet-500/15 text-violet-800 dark:text-violet-200 border-violet-500/50";
+const MAINTENANCE_TONE = "bg-amber-500/15 text-amber-800 dark:text-amber-200 border-amber-500/50";
+
+/** Owner stays and maintenance get their own colour; other holds stay hatched. */
+const blockTone = (reason: Enums<"block_reason">) =>
+  reason === "owner_stay" ? OWNER_TONE : reason === "maintenance" ? MAINTENANCE_TONE : BLOCK_TONE;
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -145,6 +152,8 @@ export function BookingCalendar({
         <Legend className={sourceTone("airbnb")} label="Airbnb" />
         <Legend className={sourceTone("direct")} label="Direct" />
         <Legend className={sourceTone("booking_com")} label="Other channel" />
+        <Legend className={OWNER_TONE} label="Owner stay" />
+        <Legend className={MAINTENANCE_TONE} label="Maintenance" />
         <Legend className={BLOCK_TONE} label="Blocked" />
       </div>
     </div>
@@ -164,6 +173,21 @@ function MonthGrid({
 }) {
   const weeks = monthGrid(month);
 
+  // What a night shows: a stay first, then an owner stay or other hold, then
+  // an Airbnb block - the hold names what Airbnb only calls "not available".
+  const itemAt = (day: string) => {
+    const stay = stays.find((s) => coversNight(day, s.checkIn, s.checkOut));
+    const block = stay
+      ? undefined
+      : (blocks.find((b) => b.reason !== "channel_sync" && coversNight(day, b.start, b.end)) ??
+        blocks.find((b) => coversNight(day, b.start, b.end)));
+    return { stay, block };
+  };
+  const idAt = (day: string) => {
+    const { stay, block } = itemAt(day);
+    return stay?.id ?? block?.id;
+  };
+
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border)]">
       <div className="grid grid-cols-7 border-b border-[var(--border)] bg-[var(--muted)]">
@@ -181,15 +205,8 @@ function MonthGrid({
         <div key={week[0]} className="grid grid-cols-7 border-b border-[var(--border)] last:border-b-0">
           {week.map((day, i) => {
             const inMonth = day.startsWith(month);
-            const stay = stays.find((s) => coversNight(day, s.checkIn, s.checkOut));
-            // An owner stay or other hold recorded inside an Airbnb block names
-            // what the Airbnb block only calls "not available".
-            const block = stay
-              ? undefined
-              : (blocks.find((b) => b.reason !== "channel_sync" && coversNight(day, b.start, b.end)) ??
-                blocks.find((b) => coversNight(day, b.start, b.end)));
+            const { stay, block } = itemAt(day);
             const checkout = stays.find((s) => s.checkOut === day);
-            const isStart = stay && (stay.checkIn === day || i === 0);
             const title = stay
               ? `${SALES_CHANNEL[stay.source]}${stay.pending ? " (pending)" : ""} · ` +
                 `${stay.checkIn} → ${stay.checkOut} · ${nightsBetween(stay.checkIn, stay.checkOut)} nights` +
@@ -198,6 +215,40 @@ function MonthGrid({
                 ? `${BLOCK_LABEL[block.reason]} · ${block.start} → ${block.end}` +
                   (block.note ? ` · ${block.note}` : "")
                 : undefined;
+
+            // A stay or block is drawn as one bar across its nights: rounded
+            // and labelled only where it really starts and ends. Where it runs
+            // on into a new week row, "…" says it continues rather than
+            // looking like a second booking.
+            // Where a bar begins or ends on screen: its own dates, or where
+            // another stay or hold takes over (an owner stay inside an
+            // Airbnb block).
+            const id = stay?.id ?? block?.id;
+            const realStart = stay ? stay.checkIn === day : block?.start === day;
+            const first = realStart || idAt(addDays(day, -1)) !== id;
+            const last = idAt(addDays(day, 1)) !== id;
+            const label = stay
+              ? (stay.label ?? SALES_CHANNEL[stay.source])
+              : block
+                ? (block.note ?? BLOCK_LABEL[block.reason])
+                : null;
+            const barText = realStart ? (
+              <>
+                {label}
+                {stay && (
+                  <span className="hidden sm:inline"> · {nightsBetween(stay.checkIn, stay.checkOut)}n</span>
+                )}
+              </>
+            ) : first || i === 0 ? (
+              <span className="opacity-70">… {label}</span>
+            ) : (
+              <span aria-hidden>&nbsp;</span>
+            );
+            const barShape = cn(
+              "relative z-10 mt-1 truncate py-0.5 text-[10px] font-medium leading-tight sm:text-[11px]",
+              first ? "rounded-l pl-1" : "-ml-1 pl-2",
+              last ? "rounded-r pr-1" : "-mr-[5px] pr-1"
+            );
 
             const cell = (
               <div
@@ -223,28 +274,20 @@ function MonthGrid({
                 {stay && (
                   <div
                     className={cn(
-                      "mt-1 truncate rounded px-1 py-0.5 text-[10px] font-medium leading-tight sm:text-[11px]",
-                      stay.pending ? "border border-dashed" : "border-l-2",
+                      barShape,
                       sourceTone(stay.source),
-                      stay.pending && "bg-transparent"
+                      stay.pending
+                        ? cn("border-y border-dashed bg-transparent", first && "border-l", last && "border-r")
+                        : first && "border-l-2"
                     )}
                   >
-                    {isStart ? (
-                      <>
-                        {SALES_CHANNEL[stay.source]}
-                        <span className="hidden sm:inline">
-                          {" "}· {nightsBetween(stay.checkIn, stay.checkOut)}n
-                        </span>
-                      </>
-                    ) : (
-                      <span aria-hidden>&nbsp;</span>
-                    )}
+                    {barText}
                   </div>
                 )}
 
                 {block && (
-                  <div className={cn("mt-1 truncate rounded px-1 py-0.5 text-[10px] font-medium sm:text-[11px]", BLOCK_TONE)}>
-                    {block.start === day || i === 0 ? (block.note ?? BLOCK_LABEL[block.reason]) : " "}
+                  <div className={cn(barShape, blockTone(block.reason), block.reason !== "channel_sync" && block.reason !== "blocked" && first && "border-l-2")}>
+                    {barText}
                   </div>
                 )}
               </div>
