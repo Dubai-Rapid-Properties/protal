@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Inbox, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireCapability } from "@/lib/auth/session";
-import { EmptyState, PageHeader, StatCard } from "@/components/domain/shared";
+import { Callout, EmptyState, PageHeader, StatCard } from "@/components/domain/shared";
 import { ExportButton } from "@/components/domain/export-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,7 @@ const formOf = (payload: unknown): string | null => {
 export default async function LeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; q?: string }>;
+  searchParams: Promise<{ view?: string; q?: string; deleted?: string }>;
 }) {
   const params = await searchParams;
   const view = params.view && params.view in VIEWS ? (params.view as keyof typeof VIEWS) : "open";
@@ -83,6 +83,12 @@ export default async function LeadsPage({
           />
         }
       />
+
+      {params.deleted && (
+        <div className="mb-4">
+          <Callout tone="info" title="Lead deleted" />
+        </div>
+      )}
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatCard label="New, not contacted" value={open.filter((l) => l.stage === "new").length} />

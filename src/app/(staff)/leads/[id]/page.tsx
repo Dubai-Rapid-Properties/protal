@@ -168,6 +168,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
 
         <LeadPanel
           leadId={lead.id}
+          leadName={lead.full_name}
           staff={staff}
           current={{
             stage: lead.stage,
