@@ -7411,3 +7411,213 @@ create policy guest_incidents_delete on guest_incidents
 revoke all on guest_incidents from public, anon;
 grant select, insert, update, delete on guest_incidents to authenticated;
 grant all on guest_incidents to service_role;
+
+-- ####################################################################
+-- ## 0034_website_team.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0034 The team on the D|R|P website
+--
+-- The people on the website's About page and on its listings (photo, role,
+-- RERA BRN, phone, WhatsApp, email), edited under Website -> Team. The
+-- website reads them from /api/public/team when it builds.
+--
+--   * A listing names its agent in website_listings.agent; the website finds
+--     the team member by name or by one of agent_names (the spellings used on
+--     Property Finder, e.g. "Adithya Mitter").
+--   * phone / whatsapp / email are what the website's buttons use. Leave one
+--     empty and that button is not shown (the listing card falls back to
+--     the DRP office numbers).
+--   * show_on_about: on the About page and with a profile page. Off: still
+--     shown as the agent on their listings.
+--   * Photos: the public listing-photos bucket, or a path on the website
+--     (the members imported below keep their current portraits).
+--
+-- Staff read the team; super admins, property managers, agents and
+-- marketing edit it (pms.can_edit_listings, 0028).
+-- ============================================================================
+
+create table website_team (
+  id            uuid primary key default gen_random_uuid(),
+  slug          text not null unique
+                  check (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$' and length(slug) <= 80),
+  name          text not null check (length(trim(name)) between 2 and 120),
+  role          text not null default '',
+  -- One line under the role on the About page
+  summary       text,
+  -- Paragraphs separated by a blank line
+  bio           text not null default '',
+  photo_url     text,
+  brn           text,
+  phone         text,
+  whatsapp      text,
+  email         text,
+  agent_names   text[] not null default '{}',
+  show_on_about boolean not null default true,
+  sort_order    integer not null default 100,
+  is_active     boolean not null default true,
+  created_by    uuid references profiles(id) on delete set null,
+  updated_by    uuid references profiles(id) on delete set null,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+create index website_team_order_idx on website_team(sort_order, name);
+
+create trigger website_team_touch before update on website_team
+  for each row execute function pms.touch_updated_at();
+
+comment on table website_team is
+  'The team on the D|R|P website (About page, listing agents), edited under Website -> Team and read by /api/public/team.';
+
+alter table website_team enable row level security;
+
+create policy website_team_read on website_team
+  for select to authenticated using (pms.is_staff());
+
+create policy website_team_insert on website_team
+  for insert to authenticated with check (pms.can_edit_listings());
+
+create policy website_team_update on website_team
+  for update to authenticated
+  using (pms.can_edit_listings()) with check (pms.can_edit_listings());
+
+create policy website_team_delete on website_team
+  for delete to authenticated using (pms.can_edit_listings());
+
+grant select, insert, update, delete on website_team to authenticated;
+grant all on website_team to service_role;
+
+-- ---------------------------------------------------------------------------
+-- Today's team, as the website shows it now
+-- ---------------------------------------------------------------------------
+insert into website_team (slug, name, role, summary, bio, photo_url, brn, whatsapp, email, agent_names, sort_order)
+values
+  ($q$jasko-miletic$q$, $q$Jasko Miletic$q$, $q$Founder & CEO$q$, $q$Active in Dubai's real estate market since 2007.$q$, $q$Jasko Miletic is the founder of Dubai Rapid Properties and has been active in Dubai’s real estate market since 2007.
+
+With nearly two decades of hands-on experience, Mr. Jasko has built his reputation on market knowledge, direct relationships, transparency and a highly personal approach to every transaction. Over the years, he has worked with private investors, property owners and international clients across Dubai, with particular expertise in luxury residential properties, investment opportunities, sales, leasing and property management.
+
+Under his leadership, Dubai Rapid Properties has evolved beyond traditional brokerage into a fully integrated real estate platform, offering clients a complete range of services – from property acquisition and sales to holiday home management, furnishing, maintenance and ongoing property management.
+
+Jasko believes that real estate is ultimately a relationship business. His philosophy remains simple: understand the client’s goals, provide straightforward advice and stay personally involved until the desired result is achieved.
+
+Dubai Rapid Properties – Since 2007.$q$, $q$/media/2023/02/Mr-Jasko-12345-scaled.jpg$q$, null, null, $q$Office@dubairapidproperties.com$q$, '{}'::text[], 10),
+  ($q$tara-topic$q$, $q$Tara Topic$q$, $q$Managing Director$q$, $q$Guiding buyers and sellers through every step, with a keen eye for detail.$q$, $q$Hi, I’m Tara and I’m passionate about turning your real estate dreams into reality! With a deep understanding of the local market and a keen eye for detail, I’m dedicated to providing exceptional service and making your buying or selling experience smooth and successful. Whether you’re looking for your perfect home or aiming to sell, I’m here to guide you every step of the way with confidence and enthusiasm. Let’s make your real estate journey an exciting adventure together!$q$, $q$/media/2024/02/Ms-Tara_-scaled.webp$q$, $q$77282$q$, $q$+971 56 777 0272$q$, $q$Office@dubairapidproperties.com$q$, '{}'::text[], 20),
+  ($q$adithya-micheal$q$, $q$Adithya Micheal$q$, $q$Luxury Property Consultant$q$, $q$Matching buyers and investors to the right opportunities across Dubai's key communities.$q$, $q$I specialise in helping buyers and investors find the right opportunities across Dubai’s key communities. From understanding current market values to spotting the properties worth a closer look, my focus is on giving clients the full picture so they can make decisions with confidence. Every client’s goal is different, and my job is to match the property to the person.$q$, $q$/media/2026/09/Untitled-1123214.webp$q$, $q$95049$q$, $q$+971 56 777 0272$q$, null, array[$q$Adithya Mitter$q$,$q$Adithya Micheal Mitter$q$]::text[], 30),
+  ($q$neel-mehra$q$, $q$Neel Mehra$q$, $q$Luxury Property Consultant$q$, $q$Investments matched to each client's lifestyle and financial goals.$q$, $q$As a trusted advisor at D|R|P, I focus on matching clients with investments that align with both their lifestyle and financial goals. I believe in going the extra mile — whether it’s finding rare deals, providing detailed insights, or negotiating the best terms. For me, success is when my clients succeed.$q$, $q$/media/2025/09/Mr-Neel-3-scaled.jpeg$q$, null, $q$+971 56 777 0272$q$, null, '{}'::text[], 40),
+  ($q$dulshan-imantha$q$, $q$Dulshan Imantha$q$, $q$Marketing Manager$q$, $q$Telling each property's story to the buyers and investors it suits.$q$, $q$At D|R|P, my job is to make sure the right people see the right properties at the right time. With a background in design and technology, I bring creative ideas and data together to build campaigns that actually bring results. For me, great marketing isn’t about noise. It’s about telling each property’s story in a way that connects with buyers and investors.$q$, $q$/media/2026/10/4CA7F18E-F8AC-442A-BAF9-9058E1273397-scaled.jpg$q$, null, null, $q$Office@dubairapidproperties.com$q$, '{}'::text[], 50),
+  ($q$anne-aristan$q$, $q$Anne Aristan$q$, $q$Office Administrator$q$, $q$Keeping the office, agents and clients running smoothly.$q$, $q$Ann is a driven and resourceful Office Administrator and Executive Assistant with extensive experience in the real estate industry. She specializes in executive support, office administration, real estate coordination, client relations, and day-to-day business operations.
+
+Highly organized and detail-oriented, Ann excels in managing high-volume workloads, coordinating with agents and clients, and ensuring smooth and efficient office operations. She brings strong communication, customer service, HR, and problem-solving skills, with a professional and hands-on approach to every task.$q$, $q$/media/2024/05/FB7B396E-4E87-4B36-B8D4-3DD5C0DF5688-scaled.jpg$q$, null, null, $q$Office@dubairapidproperties.com$q$, '{}'::text[], 60),
+  ($q$delia-cuadrante$q$, $q$Delia Cuadrante$q$, $q$Office Assistant$q$, null, $q$$q$, $q$/media/2024/07/6F4D5867-B65A-4DF7-996A-9B6C780C0AF3-scaled.jpg$q$, null, null, null, '{}'::text[], 70)
+on conflict (slug) do nothing;
+
+-- ####################################################################
+-- ## 0035_dismiss_airbnb_blocks.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0035 Staff can remove a "Blocked on Airbnb" period
+--
+-- An Airbnb "Not available" period comes from the listing's calendar feed, so
+-- deleting it in the portal did nothing: the next sync (every 15 minutes)
+-- put it back. Staff could not clear a block that no longer means anything to
+-- them - an old private stay, a period Airbnb merged with others.
+--
+-- dismiss_channel_block() now removes such a block and remembers it by the
+-- feed's UID and dates. The sync's insert of that same block is then skipped.
+-- If the channel changes the block's dates it is a different period and comes
+-- back (and the dismissal is forgotten); a block the feed drops simply goes,
+-- as before. The dates stay closed on Airbnb itself - only the portal stops
+-- showing them as blocked.
+-- ============================================================================
+
+create table if not exists channel_block_dismissals (
+  unit_id      uuid not null references units(id) on delete cascade,
+  ical_uid     text not null,
+  start_date   date not null,
+  end_date     date not null,
+  dismissed_by uuid references profiles(id) on delete set null default auth.uid(),
+  dismissed_at timestamptz not null default now(),
+  primary key (unit_id, ical_uid)
+);
+
+comment on table channel_block_dismissals is
+  'Channel "not available" periods staff removed from the portal; the calendar sync does not bring them back while their dates are unchanged.';
+
+alter table channel_block_dismissals enable row level security;
+
+create policy channel_block_dismissals_read on channel_block_dismissals
+  for select to authenticated using (pms.is_staff() and pms.can_write_unit(unit_id));
+create policy channel_block_dismissals_write on channel_block_dismissals
+  for all to authenticated
+  using (pms.is_staff() and pms.can_write_unit(unit_id))
+  with check (pms.is_staff() and pms.can_write_unit(unit_id));
+
+revoke all on channel_block_dismissals from public, anon;
+grant select, insert, update, delete on channel_block_dismissals to authenticated;
+grant all on channel_block_dismissals to service_role;
+
+-- Removes one synced channel block and keeps it from coming back. Runs as the
+-- caller, so the block and dismissal policies decide who may.
+create or replace function dismiss_channel_block(p_block_id uuid)
+returns void
+language plpgsql
+security invoker
+set search_path = public, pms
+as $$
+declare
+  b availability_blocks%rowtype;
+begin
+  select * into b
+    from availability_blocks
+   where id = p_block_id and reason = 'channel_sync' and ical_uid is not null;
+  if not found then
+    raise exception 'Airbnb block not found' using errcode = 'no_data_found';
+  end if;
+
+  insert into channel_block_dismissals (unit_id, ical_uid, start_date, end_date)
+  values (b.unit_id, b.ical_uid, b.start_date, b.end_date)
+  on conflict (unit_id, ical_uid) do update
+    set start_date = excluded.start_date, end_date = excluded.end_date,
+        dismissed_by = auth.uid(), dismissed_at = now();
+
+  delete from availability_blocks where id = p_block_id;
+end;
+$$;
+
+revoke all on function dismiss_channel_block(uuid) from public, anon;
+grant execute on function dismiss_channel_block(uuid) to authenticated;
+
+-- The sync's insert of a dismissed block, with the same dates, is skipped.
+-- Sees every dismissal whoever runs the sync (staff's Sync now, or the cron).
+create or replace function pms.skip_dismissed_channel_block()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  d channel_block_dismissals%rowtype;
+begin
+  select * into d from channel_block_dismissals
+   where unit_id = new.unit_id and ical_uid = new.ical_uid;
+  if not found then
+    return new;
+  end if;
+  if d.start_date = new.start_date and d.end_date = new.end_date then
+    return null;
+  end if;
+  -- The channel changed the period: show it again.
+  delete from channel_block_dismissals where unit_id = new.unit_id and ical_uid = new.ical_uid;
+  return new;
+end;
+$$;
+
+drop trigger if exists availability_blocks_skip_dismissed on availability_blocks;
+create trigger availability_blocks_skip_dismissed
+  before insert on availability_blocks
+  for each row
+  when (new.reason = 'channel_sync' and new.ical_uid is not null)
+  execute function pms.skip_dismissed_channel_block();
