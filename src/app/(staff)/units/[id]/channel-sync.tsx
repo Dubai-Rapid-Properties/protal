@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useActionState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
-import { AlertTriangle, Check, Copy, RefreshCw, RotateCcw } from "lucide-react";
+import { AlertTriangle, Check, Copy, Link2, RefreshCw, RotateCcw, Unlink } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,11 +13,23 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { FormError } from "@/components/domain/form";
 import {
+  linkChannelStay,
   regenerateExportLink,
   saveAirbnbLink,
   syncUnitNow,
+  unlinkChannelStay,
   type SyncActionState,
 } from "../../bookings/calendar-sync-actions";
+import { formatDate } from "@/lib/dates";
+
+/** An Airbnb stay and the portal booking it overlaps, or is linked to. */
+export interface ChannelStay {
+  uid: string;
+  code: string | null;
+  start: string | null;
+  end: string | null;
+  booking: { id: string; number: string; guest: string | null; checkIn: string; checkOut: string } | null;
+}
 
 export interface ChannelSyncProps {
   unitId: string;
@@ -28,6 +41,10 @@ export interface ChannelSyncProps {
   eventCount: number | null;
   flaggedCount: number;
   canManage: boolean;
+  /** Airbnb stays the last sync could not import, with the booking in the way. */
+  clashes: ChannelStay[];
+  /** Airbnb stays staff linked to a booking here. */
+  links: ChannelStay[];
 }
 
 function SaveButton() {
@@ -56,6 +73,7 @@ export function ChannelSync(props: ChannelSyncProps) {
   );
   const [syncing, startSync] = useTransition();
   const [regenerating, startRegenerate] = useTransition();
+  const [linking, startLink] = useTransition();
   const [copied, setCopied] = React.useState(false);
 
   React.useEffect(() => {
@@ -133,6 +151,104 @@ export function ChannelSync(props: ChannelSyncProps) {
                 </div>
               )}
             </dl>
+          )}
+
+          {props.clashes.length > 0 && (
+            <div className="mt-3 space-y-2">
+              {props.clashes.map((c) => (
+                <div
+                  key={c.uid}
+                  className="flex flex-col gap-2 rounded-lg border border-[var(--destructive)]/30 bg-[var(--destructive)]/5 p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <p>
+                    Airbnb stay{" "}
+                    <span className="tabular font-medium">
+                      {formatDate(c.start)} → {formatDate(c.end)}
+                    </span>
+                    {c.code && <span className="text-[var(--muted-foreground)]"> ({c.code})</span>}
+                    {c.booking && (
+                      <>
+                        {" "}overlaps{" "}
+                        <Link href={`/bookings/${c.booking.id}`} className="font-medium underline underline-offset-2">
+                          {c.booking.number}
+                        </Link>
+                        {c.booking.guest && ` · ${c.booking.guest}`}{" "}
+                        <span className="tabular text-[var(--muted-foreground)]">
+                          ({formatDate(c.booking.checkIn)} → {formatDate(c.booking.checkOut)})
+                        </span>
+                      </>
+                    )}
+                  </p>
+                  {props.canManage && c.booking && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0"
+                      disabled={linking}
+                      title="A private guest who booked through Airbnb: keep the booking here and stop importing this Airbnb stay."
+                      onClick={() =>
+                        startLink(run(() => linkChannelStay(props.unitId, c.uid, c.booking!.id)))
+                      }
+                    >
+                      <Link2 className="size-4" />
+                      Same stay - link to {c.booking.number}
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Link when it is the same guest - a private guest who booked through Airbnb. If it is a
+                different guest, the unit is double-booked: sort it out on Airbnb.
+              </p>
+            </div>
+          )}
+
+          {props.links.length > 0 && (
+            <div className="mt-3">
+              <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                Airbnb stays linked to bookings here
+              </p>
+              <ul className="mt-1 space-y-1 text-sm">
+                {props.links.map((l) => (
+                  <li key={l.uid} className="flex flex-wrap items-center justify-between gap-2">
+                    <span>
+                      {l.code ?? "Airbnb stay"}
+                      {l.start && (
+                        <span className="tabular text-[var(--muted-foreground)]">
+                          {" "}({formatDate(l.start)} → {formatDate(l.end)})
+                        </span>
+                      )}
+                      {l.booking && (
+                        <>
+                          {" "}→{" "}
+                          <Link href={`/bookings/${l.booking.id}`} className="underline underline-offset-2">
+                            {l.booking.number}
+                          </Link>
+                          {l.booking.guest && ` · ${l.booking.guest}`}
+                        </>
+                      )}
+                    </span>
+                    {props.canManage && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={linking}
+                        onClick={() => {
+                          if (window.confirm("Unlink? The Airbnb stay is read again on the next sync.")) {
+                            startLink(run(() => unlinkChannelStay(props.unitId, l.uid)));
+                          }
+                        }}
+                      >
+                        <Unlink className="size-4" />
+                        Unlink
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
 
           {props.canManage ? (

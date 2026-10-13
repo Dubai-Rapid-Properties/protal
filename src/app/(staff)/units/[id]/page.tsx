@@ -42,7 +42,7 @@ import { RecordActions } from "@/components/domain/record-actions";
 import { archiveUnit, deleteUnit, restoreUnit } from "../actions";
 import { PermitDialog } from "./permit-dialog";
 import { BlockDatesDialog, BlockNoteDialog, RemoveBlockButton } from "./block-dates";
-import { ChannelSync } from "./channel-sync";
+import { ChannelSync, type ChannelStay } from "./channel-sync";
 import { env } from "@/lib/env";
 import { BookingCalendar } from "@/components/domain/booking-calendar";
 import { dubaiToday, monthGrid, parseMonth, rangesOverlap, uncoveredRanges } from "@/lib/calendar";
@@ -98,6 +98,8 @@ export default async function UnitDetailPage({
     staysResult,
     blocksResult,
     flaggedResult,
+    clashResult,
+    linkResult,
   ] = await Promise.all([
     requireCapability("units.view"),
     supabase
@@ -160,6 +162,20 @@ export default async function UnitDetailPage({
       .eq("imported_without_permit", true)
       .in("status", ["confirmed", "checked_in"])
       .gt("check_out", dubaiToday()),
+    // Airbnb stays the last sync could not import, and ones linked to a
+    // booking here (a private guest who booked through Airbnb, 0036).
+    supabase
+      .from("channel_feed_clashes")
+      .select("ical_uid, code, start_date, end_date, bookings(id, booking_number, check_in, check_out, guests(full_name))")
+      .eq("unit_id", id)
+      .eq("channel", "airbnb")
+      .order("start_date"),
+    supabase
+      .from("channel_stay_links")
+      .select("ical_uid, code, start_date, end_date, bookings(id, booking_number, check_in, check_out, guests(full_name))")
+      .eq("unit_id", id)
+      .eq("channel", "airbnb")
+      .order("start_date"),
   ]);
 
   if (!unit) notFound();
@@ -562,6 +578,8 @@ export default async function UnitDetailPage({
               error={unit.ical_last_error}
               eventCount={unit.ical_last_event_count}
               flaggedCount={hasValidPermit ? 0 : (flaggedResult.count ?? 0)}
+              clashes={(clashResult.data ?? []).map(toChannelStay)}
+              links={(linkResult.data ?? []).map(toChannelStay)}
               canManage={can(profile.role, "bookings.manage")}
             />
             <Card className="mb-5">
@@ -776,4 +794,29 @@ export default async function UnitDetailPage({
       </Tabs>
     </>
   );
+}
+
+function toChannelStay(r: {
+  ical_uid: string;
+  code: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  bookings: {
+    id: string;
+    booking_number: string;
+    check_in: string;
+    check_out: string;
+    guests: { full_name: string } | null;
+  } | null;
+}): ChannelStay {
+  const b = r.bookings;
+  return {
+    uid: r.ical_uid,
+    code: r.code,
+    start: r.start_date,
+    end: r.end_date,
+    booking: b
+      ? { id: b.id, number: b.booking_number, guest: b.guests?.full_name ?? null, checkIn: b.check_in, checkOut: b.check_out }
+      : null,
+  };
 }

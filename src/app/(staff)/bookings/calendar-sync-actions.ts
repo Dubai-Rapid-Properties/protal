@@ -143,3 +143,60 @@ export async function regenerateExportLink(id: string): Promise<SyncActionState>
   refresh(id);
   return { success: "New export link created. Paste it into Airbnb - the old one no longer works." };
 }
+
+const icalUid = z.string().trim().min(1).max(500);
+
+/** Syncs one unit again after a link changes, so its problem line updates at once. */
+async function resync(supabase: Awaited<ReturnType<typeof createClient>>, id: string): Promise<SyncActionState> {
+  const { data: unit } = await supabase.from("units").select("airbnb_ical_url").eq("id", id).maybeSingle();
+  if (!unit?.airbnb_ical_url) return {};
+  return describe(await syncUnit(supabase, id, unit.airbnb_ical_url));
+}
+
+/**
+ * "This Airbnb stay is that booking": a private guest who booked through
+ * Airbnb, already recorded here as a Direct booking. The sync skips the stay
+ * from then on instead of reporting it as overlapping (0036).
+ */
+export async function linkChannelStay(id: string, uid: string, bookingId: string): Promise<SyncActionState> {
+  const denied = await requireManager();
+  if (denied) return { error: denied };
+  if (!unitId.safeParse(id).success || !unitId.safeParse(bookingId).success || !icalUid.safeParse(uid).success) {
+    return { error: "Unknown stay." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("link_channel_stay", {
+    p_unit_id: id,
+    p_channel: "airbnb",
+    p_ical_uid: uid,
+    p_booking_id: bookingId,
+  });
+  if (error) return { error: error.message };
+
+  const after = await resync(supabase, id);
+  refresh(id);
+  return after.error ? { success: "Linked.", ...after } : { success: "Linked. The sync no longer reports this stay." };
+}
+
+/** Undoes a link: the Airbnb stay is read again on this sync. */
+export async function unlinkChannelStay(id: string, uid: string): Promise<SyncActionState> {
+  const denied = await requireManager();
+  if (denied) return { error: denied };
+  if (!unitId.safeParse(id).success || !icalUid.safeParse(uid).success) return { error: "Unknown stay." };
+
+  const supabase = await createClient();
+  const { data: removed, error } = await supabase
+    .from("channel_stay_links")
+    .delete()
+    .eq("unit_id", id)
+    .eq("channel", "airbnb")
+    .eq("ical_uid", uid)
+    .select("ical_uid");
+  if (error) return { error: error.message };
+  if (!removed?.length) return { error: "This link could not be removed." };
+
+  const after = await resync(supabase, id);
+  refresh(id);
+  return after.error ? after : { success: "Unlinked. The Airbnb stay is read again." };
+}
