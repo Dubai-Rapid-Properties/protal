@@ -405,6 +405,54 @@ export type Database = {
           },
         ];
       };
+      channel_feed_clashes: {
+        Row: {
+          unit_id: string;
+          channel: Database["public"]["Enums"]["sales_channel"];
+          ical_uid: string;
+          code: string | null;
+          start_date: string;
+          end_date: string;
+          booking_id: string | null;
+          seen_at: string;
+        };
+        Insert: {
+          unit_id: string;
+          channel: Database["public"]["Enums"]["sales_channel"];
+          ical_uid: string;
+          code?: string | null;
+          start_date: string;
+          end_date: string;
+          booking_id?: string | null;
+          seen_at?: string;
+        };
+        Update: {
+          unit_id?: string;
+          channel?: Database["public"]["Enums"]["sales_channel"];
+          ical_uid?: string;
+          code?: string | null;
+          start_date?: string;
+          end_date?: string;
+          booking_id?: string | null;
+          seen_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "channel_feed_clashes_booking_id_fkey";
+            columns: ["booking_id"];
+            isOneToOne: false;
+            referencedRelation: "bookings";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "channel_feed_clashes_unit_id_fkey";
+            columns: ["unit_id"];
+            isOneToOne: false;
+            referencedRelation: "units";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       channel_listings: {
         Row: {
           id: string;
@@ -469,6 +517,64 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "channel_listings_unit_id_fkey";
+            columns: ["unit_id"];
+            isOneToOne: false;
+            referencedRelation: "units";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      channel_stay_links: {
+        Row: {
+          unit_id: string;
+          channel: Database["public"]["Enums"]["sales_channel"];
+          ical_uid: string;
+          code: string | null;
+          start_date: string | null;
+          end_date: string | null;
+          booking_id: string;
+          linked_by: string | null;
+          linked_at: string;
+        };
+        Insert: {
+          unit_id: string;
+          channel: Database["public"]["Enums"]["sales_channel"];
+          ical_uid: string;
+          code?: string | null;
+          start_date?: string | null;
+          end_date?: string | null;
+          booking_id: string;
+          linked_by?: string | null;
+          linked_at?: string;
+        };
+        Update: {
+          unit_id?: string;
+          channel?: Database["public"]["Enums"]["sales_channel"];
+          ical_uid?: string;
+          code?: string | null;
+          start_date?: string | null;
+          end_date?: string | null;
+          booking_id?: string;
+          linked_by?: string | null;
+          linked_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "channel_stay_links_booking_id_fkey";
+            columns: ["booking_id"];
+            isOneToOne: false;
+            referencedRelation: "bookings";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "channel_stay_links_linked_by_fkey";
+            columns: ["linked_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "channel_stay_links_unit_id_fkey";
             columns: ["unit_id"];
             isOneToOne: false;
             referencedRelation: "units";
@@ -5053,6 +5159,10 @@ export type Database = {
         Returns: unknown;
       };
       ical_export_events: {
+        Args: Record<string, unknown>;
+        Returns: unknown;
+      };
+      link_channel_stay: {
         Args: Record<string, unknown>;
         Returns: unknown;
       };
