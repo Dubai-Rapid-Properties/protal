@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   addDays,
+  bookingHorizon,
   coversNight,
   dubaiToday,
   monthGrid,
@@ -14,6 +15,7 @@ import {
   rangesOverlap,
   shiftMonth,
   uncoveredRanges,
+  withinHorizonFilter,
 } from "@/lib/calendar";
 
 test("month arithmetic", () => {
@@ -93,4 +95,10 @@ test("uncoveredRanges leaves what a block still has free", () => {
   assert.deepEqual(uncoveredRanges(...block, [{ start: "2026-12-01", end: "2026-12-05" }]), [
     { start: "2026-09-29", end: "2026-11-11" },
   ]);
+});
+
+test("bookingHorizon is a year ahead; Airbnb blocks from then on are hidden", () => {
+  assert.equal(bookingHorizon("2026-10-14"), "2027-10-14");
+  assert.equal(bookingHorizon("2028-02-29"), "2029-03-01");
+  assert.equal(withinHorizonFilter("2026-10-14"), "reason.neq.channel_sync,start_date.lt.2027-10-14");
 });

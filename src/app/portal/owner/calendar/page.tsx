@@ -5,7 +5,7 @@ import { requireRole, getPortalSettings } from "@/lib/auth/session";
 import { PageHeader, EmptyState } from "@/components/domain/shared";
 import { BookingCalendar } from "@/components/domain/booking-calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { monthSpanRange, parseMonth, parseMonthSpan } from "@/lib/calendar";
+import { dubaiToday, monthSpanRange, parseMonth, parseMonthSpan, withinHorizonFilter } from "@/lib/calendar";
 
 export const metadata = { title: "Calendar" };
 
@@ -52,7 +52,8 @@ export default async function OwnerCalendarPage({
           .select("*")
           .in("unit_id", ids)
           .lt("start_date", gridEnd)
-          .gt("end_date", gridStart),
+          .gt("end_date", gridStart)
+          .or(withinHorizonFilter(dubaiToday())),
       ])
     : [{ data: [] }, { data: [] }];
 
