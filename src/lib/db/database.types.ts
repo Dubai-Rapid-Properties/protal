@@ -677,6 +677,7 @@ export type Database = {
           updated_at: string;
           show_guest_first_name_to_owners: boolean;
           email_owners_about_bookings: boolean;
+          email_office_about_bookings: boolean;
         };
         Insert: {
           id?: boolean;
@@ -717,6 +718,7 @@ export type Database = {
           updated_at?: string;
           show_guest_first_name_to_owners?: boolean;
           email_owners_about_bookings?: boolean;
+          email_office_about_bookings?: boolean;
         };
         Update: {
           id?: boolean;
@@ -757,6 +759,7 @@ export type Database = {
           updated_at?: string;
           show_guest_first_name_to_owners?: boolean;
           email_owners_about_bookings?: boolean;
+          email_office_about_bookings?: boolean;
         };
         Relationships: [];
       };
