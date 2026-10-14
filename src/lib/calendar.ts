@@ -89,6 +89,23 @@ export function monthSpanRange(month: string, span: number): { start: string; en
   return { start: monthGrid(month)[0][0], end: addDays(last.at(-1)!.at(-1)!, 1) };
 }
 
+/**
+ * D|R|P takes bookings up to a year ahead, and Airbnb closes everything past
+ * its own booking window with a "not available" period. An Airbnb block that
+ * starts on or after this date is that window edge, not a real block, and is
+ * not shown.
+ */
+export function bookingHorizon(today: string): string {
+  const [y, m, d] = today.split("-").map(Number);
+  // 29 Feb + 1 year -> 1 Mar, like the database's interval arithmetic.
+  return isoDate(new Date(Date.UTC(y + 1, m - 1, d)));
+}
+
+/** A PostgREST filter: every block except Airbnb's past the booking horizon. */
+export function withinHorizonFilter(today: string): string {
+  return `reason.neq.channel_sync,start_date.lt.${bookingHorizon(today)}`;
+}
+
 /** Does a half-open [start, end) range cover the night of `day`? */
 export function coversNight(day: string, start: string, end: string): boolean {
   return start <= day && day < end;

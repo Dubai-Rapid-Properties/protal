@@ -45,7 +45,7 @@ import { BlockDatesDialog, BlockNoteDialog, RemoveBlockButton } from "./block-da
 import { ChannelSync, type ChannelStay } from "./channel-sync";
 import { env } from "@/lib/env";
 import { BookingCalendar } from "@/components/domain/booking-calendar";
-import { dubaiToday, monthGrid, parseMonth, rangesOverlap, uncoveredRanges } from "@/lib/calendar";
+import { dubaiToday, monthGrid, parseMonth, rangesOverlap, uncoveredRanges, withinHorizonFilter } from "@/lib/calendar";
 
 /** Shared by the page and its metadata, so the overview row is fetched once. */
 const getOverview = cache(async (id: string) => {
@@ -152,6 +152,7 @@ export default async function UnitDetailPage({
       .select("id, start_date, end_date, reason, note")
       .eq("unit_id", id)
       .neq("reason", "booking")
+      .or(withinHorizonFilter(dubaiToday()))
       .gt("end_date", dubaiToday() < gridStart ? dubaiToday() : gridStart)
       .order("start_date"),
     // Upcoming Airbnb stays imported while the unit had no DET permit.

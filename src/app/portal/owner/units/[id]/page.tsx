@@ -8,7 +8,7 @@ import { UnitStatusBadge } from "@/components/domain/status-badge";
 import { BookingCalendar } from "@/components/domain/booking-calendar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { dubaiToday, monthSpanRange, parseMonth, parseMonthSpan } from "@/lib/calendar";
+import { dubaiToday, monthSpanRange, parseMonth, parseMonthSpan, withinHorizonFilter } from "@/lib/calendar";
 import { formatDate } from "@/lib/dates";
 import { UNIT_KIND } from "@/lib/labels";
 import { OwnerBookingsTable } from "../../owner-bookings-table";
@@ -55,7 +55,8 @@ export default async function OwnerUnitPage({
       .select("*")
       .eq("unit_id", id)
       .lt("start_date", gridEnd)
-      .gt("end_date", gridStart),
+      .gt("end_date", gridStart)
+      .or(withinHorizonFilter(today)),
     supabase
       .from("owner_bookings_view")
       .select("*")
