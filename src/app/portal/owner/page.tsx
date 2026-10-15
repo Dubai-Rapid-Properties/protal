@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Building2, CalendarDays, History, Moon, ShieldCheck, Wrench } from "lucide-react";
+import { Building2, CalendarDays, History, ShieldCheck, TrendingUp, Wrench } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireRole, getPortalSettings } from "@/lib/auth/session";
 import { PageHeader, StatCard, EmptyState, Money } from "@/components/domain/shared";
@@ -19,8 +19,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDate } from "@/lib/dates";
-import { addDays, dubaiToday, monthRange, nightsWithin } from "@/lib/calendar";
+import { addDays, dubaiToday, monthRange, shiftMonth } from "@/lib/calendar";
+import { combineOccupancy, occupancy } from "@/lib/occupancy";
 import { COMPLIANCE_KIND } from "@/lib/labels";
+import { OccupancyCard } from "./occupancy-card";
 import { OwnerBookingsTable } from "./owner-bookings-table";
 
 export const metadata = { title: "My portfolio" };
@@ -34,10 +36,29 @@ export default async function OwnerPortalPage() {
   const supabase = await createClient();
 
   const today = dubaiToday();
-  const { start: monthStart, end: monthEnd } = monthRange(today.slice(0, 7));
+  const thisMonth = today.slice(0, 7);
+  const lastMonth = shiftMonth(thisMonth, -1);
+  const { start: monthStart } = monthRange(thisMonth);
+  // Occupancy periods, half-open: last month, this month, the next 30 nights.
+  const periods = [
+    { key: "last", label: shortMonth(lastMonth), from: `${lastMonth}-01`, to: monthStart },
+    { key: "this", label: shortMonth(thisMonth), from: monthStart, to: `${shiftMonth(thisMonth, 1)}-01` },
+    { key: "next", label: "Next 30 days", from: today, to: addDays(today, 30) },
+  ] as const;
+  const occFrom = periods[0].from;
+  const occTo = periods[1].to > periods[2].to ? periods[1].to : periods[2].to;
 
-  const [profile, settings, unitsResult, bookingsResult, pastResult, complianceResult, maintenanceResult] =
-    await Promise.all([
+  const [
+    profile,
+    settings,
+    unitsResult,
+    bookingsResult,
+    pastResult,
+    complianceResult,
+    maintenanceResult,
+    occStaysResult,
+    occClosedResult,
+  ] = await Promise.all([
       requireRole(["owner"]),
       getPortalSettings(),
       supabase.from("owner_units_view").select("*").eq("is_active", true).order("property_name"),
@@ -65,6 +86,17 @@ export default async function OwnerPortalPage() {
         .not("status", "in", "(closed,cancelled,rejected)")
         .order("reported_at", { ascending: false })
         .limit(6),
+      // Stays and closed nights over the occupancy periods.
+      supabase
+        .from("owner_bookings_view")
+        .select("unit_id, check_in, check_out")
+        .gt("check_out", occFrom)
+        .lt("check_in", occTo),
+      supabase
+        .from("owner_calendar_blocks_view")
+        .select("unit_id, start_date, end_date")
+        .gt("end_date", occFrom)
+        .lt("start_date", occTo),
     ]);
 
   const units = unitsResult.data ?? [];
@@ -75,10 +107,22 @@ export default async function OwnerPortalPage() {
 
   const upcoming = bookings.filter((b) => b.check_out! > today);
   const next90 = upcoming.filter((b) => b.check_in! <= addDays(today, 90));
-  const nightsThisMonth = bookings.reduce(
-    (sum, b) => sum + nightsWithin(b.check_in!, b.check_out!, monthStart, monthEnd),
-    0
-  );
+
+  // Occupancy is for the holiday homes; a leased unit has no nights to let.
+  const holidayHomes = units.filter((u) => u.operating_mode === "short_term" || u.operating_mode === "both");
+  const occStays = occStaysResult.data ?? [];
+  const occClosed = occClosedResult.data ?? [];
+  const unitOccupancy = holidayHomes.map((u) => {
+    const stays = occStays.filter((b) => b.unit_id === u.id).map((b) => ({ start: b.check_in!, end: b.check_out! }));
+    const closed = occClosed.filter((c) => c.unit_id === u.id).map((c) => ({ start: c.start_date!, end: c.end_date! }));
+    return {
+      id: u.id!,
+      label: `${u.property_name} · ${u.unit_number}`,
+      byPeriod: periods.map((p) => occupancy(p.from, p.to, stays, closed)),
+    };
+  });
+  const totalOccupancy = periods.map((_, i) => combineOccupancy(unitOccupancy.map((u) => u.byPeriod[i])));
+  const thisMonthOccupancy = totalOccupancy[1];
 
   const awaitingApproval = tickets.filter(
     (t) => t.owner_approval_required && !t.owner_approved_at && !t.owner_rejected_at
@@ -129,9 +173,14 @@ export default async function OwnerPortalPage() {
           href="/portal/owner/bookings"
         />
         <StatCard
-          label="Nights booked this month"
-          value={nightsThisMonth}
-          icon={<Moon className="size-5" />}
+          label="Occupancy this month"
+          value={thisMonthOccupancy.rate == null ? "—" : `${thisMonthOccupancy.rate}%`}
+          sublabel={
+            thisMonthOccupancy.available
+              ? `${thisMonthOccupancy.booked} of ${thisMonthOccupancy.available} nights booked`
+              : "No holiday-home nights this month"
+          }
+          icon={<TrendingUp className="size-5" />}
         />
         <StatCard
           label="Compliance"
@@ -141,6 +190,14 @@ export default async function OwnerPortalPage() {
           tone={compliance.length === 0 ? "success" : "warning"}
         />
       </div>
+
+      {unitOccupancy.length > 0 && (
+        <OccupancyCard
+          periods={periods.map((p) => p.label)}
+          units={unitOccupancy}
+          total={unitOccupancy.length > 1 ? totalOccupancy : null}
+        />
+      )}
 
       <Card className="mt-6">
         <CardHeader className="flex-row items-center justify-between">
@@ -291,6 +348,11 @@ export default async function OwnerPortalPage() {
       )}
     </>
   );
+}
+
+/** "Oct" for 2026-10. */
+function shortMonth(month: string): string {
+  return new Date(`${month}-01T00:00:00Z`).toLocaleString("en-GB", { month: "short", timeZone: "UTC" });
 }
 
 function MaintenanceCard({
