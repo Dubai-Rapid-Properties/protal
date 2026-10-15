@@ -201,7 +201,13 @@ export const INCIDENT_CATEGORY = {
 } as const;
 export type IncidentCategory = keyof typeof INCIDENT_CATEGORY;
 
-export const INCIDENT_STATUS = { open: "Open", resolved: "Resolved" } as const;
+export const INCIDENT_STATUS = {
+  open: "Open",
+  in_progress: "In progress",
+  awaiting_payment: "Waiting for payment",
+  resolved: "Resolved",
+  closed: "Closed - no charge",
+} as const;
 export type IncidentStatus = keyof typeof INCIDENT_STATUS;
 
 export const INVOICE_STATUS: LabelMap<Enums<"invoice_status">> = {

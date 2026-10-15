@@ -1,4 +1,4 @@
-import { INCIDENT_CATEGORY, type IncidentCategory } from "@/lib/labels";
+import { INCIDENT_CATEGORY, INCIDENT_STATUS, type IncidentCategory, type IncidentStatus } from "@/lib/labels";
 
 /**
  * Guest incidents (migration 0033): what a guest did to a unit. Staff only -
@@ -7,6 +7,21 @@ import { INCIDENT_CATEGORY, type IncidentCategory } from "@/lib/labels";
  */
 
 export const INCIDENT_CATEGORIES = Object.keys(INCIDENT_CATEGORY) as IncidentCategory[];
+
+export const INCIDENT_STATUSES = Object.keys(INCIDENT_STATUS) as IncidentStatus[];
+
+/** Done with: nothing left to follow up (0039). Every other status is open. */
+export const FINISHED_INCIDENT_STATUSES: readonly IncidentStatus[] = ["resolved", "closed"];
+
+export function isIncidentOpen(status: string): boolean {
+  return !(FINISHED_INCIDENT_STATUSES as readonly string[]).includes(status);
+}
+
+/** "Open → In progress" for the timeline; a status the app does not know shows as stored. */
+export function incidentStatusChange(from: string | null, to: string): string {
+  const label = (s: string) => INCIDENT_STATUS[s as IncidentStatus] ?? s;
+  return `${from ? label(from) : "New"} → ${label(to)}`;
+}
 
 /** Photos arrive already shrunk in the browser; this is the hard ceiling. */
 export const MAX_INCIDENT_PHOTO_BYTES = 4 * 1024 * 1024;

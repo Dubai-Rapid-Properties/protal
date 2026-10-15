@@ -2,7 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   INCIDENT_CATEGORIES,
+  INCIDENT_STATUSES,
   MAX_INCIDENT_PHOTO_BYTES,
+  incidentStatusChange,
+  isIncidentOpen,
   incidentPhotoPath,
   incidentPhotoProblem,
 } from "@/lib/incidents";
@@ -46,4 +49,17 @@ test("owners, tenants and guests cannot see incidents; staff can", () => {
   }
   assert.equal(can("finance", "incidents.view"), true);
   assert.equal(can("finance", "incidents.report"), false);
+});
+
+test("incident statuses match the database check (0039)", () => {
+  assert.deepEqual(INCIDENT_STATUSES, ["open", "in_progress", "awaiting_payment", "resolved", "closed"]);
+});
+
+test("resolved and closed are finished; the rest are open", () => {
+  assert.deepEqual(INCIDENT_STATUSES.filter(isIncidentOpen), ["open", "in_progress", "awaiting_payment"]);
+});
+
+test("a status change reads as before and after", () => {
+  assert.equal(incidentStatusChange("open", "awaiting_payment"), "Open → Waiting for payment");
+  assert.equal(incidentStatusChange(null, "closed"), "New → Closed - no charge");
 });
