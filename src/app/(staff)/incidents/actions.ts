@@ -8,6 +8,7 @@ import { can } from "@/lib/auth/rbac";
 import { BUCKETS, storage } from "@/lib/storage";
 import {
   INCIDENT_CATEGORIES,
+  INCIDENT_STATUSES,
   MAX_INCIDENT_PHOTOS,
   incidentPhotoPath,
   incidentPhotoProblem,
@@ -27,6 +28,7 @@ const incidentSchema = z.object({
   category: z.enum(INCIDENT_CATEGORIES as [string, ...string[]], { message: "Choose what happened" }),
   description: z.string().trim().min(3, "Describe what happened").max(4000),
   chargeAed: optional(z.coerce.number().min(0, "The charge cannot be negative").max(1_000_000)),
+  status: z.enum(INCIDENT_STATUSES as [string, ...string[]]).default("open"),
 });
 
 function explain(error: { code?: string; message: string }): string {
@@ -56,6 +58,7 @@ export async function createIncident(formData: FormData): Promise<ActionState & 
       category: v.category,
       description: v.description,
       charge_aed: v.chargeAed ?? null,
+      status: v.status,
       reported_by: profile.id,
     })
     .select("id")
@@ -68,12 +71,11 @@ export async function createIncident(formData: FormData): Promise<ActionState & 
 }
 
 const updateSchema = z.object({
-  status: z.enum(["open", "resolved"]),
   resolution: z.string().trim().max(2000).optional(),
   chargeAed: optional(z.coerce.number().min(0, "The charge cannot be negative").max(1_000_000)),
 });
 
-/** Records the outcome: the charge, what was done, open or resolved. */
+/** Records the outcome: the charge and what was done. The status has its own action. */
 export async function updateIncident(
   incidentId: string,
   _prev: ActionState,
@@ -90,7 +92,7 @@ export async function updateIncident(
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("guest_incidents")
-    .update({ status: v.status, resolution: v.resolution || null, charge_aed: v.chargeAed ?? null })
+    .update({ resolution: v.resolution || null, charge_aed: v.chargeAed ?? null })
     .eq("id", incidentId)
     .select("id, booking_id");
   if (error) return { error: explain(error) };
@@ -99,7 +101,75 @@ export async function updateIncident(
   revalidatePath("/incidents");
   revalidatePath(`/incidents/${incidentId}`);
   if (data[0].booking_id) revalidatePath(`/bookings/${data[0].booking_id}`);
-  return { success: v.status === "resolved" ? "Incident resolved." : "Incident saved." };
+  return { success: "Saved." };
+}
+
+const statusSchema = z.object({
+  status: z.enum(INCIDENT_STATUSES as [string, ...string[]], { message: "Choose a status" }),
+  note: z.string().trim().max(2000, "Keep the comment under 2,000 characters").optional(),
+});
+
+/** Moves the incident to a status; the change, and any comment, go on its timeline. */
+export async function changeIncidentStatus(
+  incidentId: string,
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "incidents.report")) return { error: "You do not have permission to change incidents." };
+  if (!z.string().uuid().safeParse(incidentId).success) return { error: "Incident not found." };
+
+  const parsed = statusSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form." };
+  const { status, note } = parsed.data;
+
+  const supabase = await createClient();
+  const { data: incident } = await supabase
+    .from("guest_incidents")
+    .select("status, booking_id")
+    .eq("id", incidentId)
+    .maybeSingle();
+  if (!incident) return { error: NOT_CHANGED };
+  if (incident.status === status && !note) return { error: "That is already the status." };
+
+  const { error } = await supabase.rpc("set_guest_incident_status", {
+    p_incident_id: incidentId,
+    p_status: status,
+    p_note: note || undefined,
+  });
+  if (error) return { error: explain(error) };
+
+  revalidatePath("/incidents");
+  revalidatePath(`/incidents/${incidentId}`);
+  if (incident.booking_id) revalidatePath(`/bookings/${incident.booking_id}`);
+  return { success: incident.status === status ? "Comment added." : "Status updated." };
+}
+
+const commentSchema = z.object({
+  note: z.string().trim().min(1, "Write a comment").max(2000, "Keep the comment under 2,000 characters"),
+});
+
+/** Adds a comment to the incident's timeline. */
+export async function addIncidentComment(
+  incidentId: string,
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "incidents.report")) return { error: "You do not have permission to comment on incidents." };
+  if (!z.string().uuid().safeParse(incidentId).success) return { error: "Incident not found." };
+
+  const parsed = commentSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the comment." };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("guest_incident_updates")
+    .insert({ incident_id: incidentId, author_id: profile.id, note: parsed.data.note });
+  if (error) return { error: explain(error) };
+
+  revalidatePath(`/incidents/${incidentId}`);
+  return { success: "Comment added." };
 }
 
 /**

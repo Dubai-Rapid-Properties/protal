@@ -7,7 +7,7 @@ import { ImagePlus, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { FormError, FormSection, SelectField, TextAreaField, TextField } from "@/components/domain/form";
 import { Button } from "@/components/ui/button";
-import { INCIDENT_CATEGORY, optionsFrom } from "@/lib/labels";
+import { INCIDENT_CATEGORY, INCIDENT_STATUS, optionsFrom } from "@/lib/labels";
 import { MAX_INCIDENT_PHOTOS } from "@/lib/incidents";
 import { shrinkPhoto } from "@/lib/shrink-photo";
 import { addIncidentPhoto, createIncident } from "../actions";
@@ -151,6 +151,7 @@ export function IncidentForm({
           options={optionsFrom(INCIDENT_CATEGORY)}
         />
         <TextField name="occurredOn" label="Date found" type="date" required defaultValue={today} max={today} />
+        <SelectField name="status" label="Status" defaultValue="open" options={optionsFrom(INCIDENT_STATUS)} />
         <TextAreaField
           name="description"
           label="Description"

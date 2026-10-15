@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireCapability } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
 import { EmptyState, Money, PageHeader, StatCard } from "@/components/domain/shared";
-import { Badge } from "@/components/ui/badge";
+import { IncidentStatusBadge } from "@/components/domain/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -22,11 +22,14 @@ import {
 import { dubaiToday } from "@/lib/calendar";
 import { formatDate } from "@/lib/dates";
 import { INCIDENT_CATEGORY, INCIDENT_STATUS, type IncidentCategory } from "@/lib/labels";
+import { FINISHED_INCIDENT_STATUSES } from "@/lib/incidents";
 
 export const metadata = { title: "Guest incidents" };
 
-const VIEWS = { open: "Open", resolved: "Resolved", all: "All" } as const;
+// "Open" is everything not finished; then each status on its own.
+const VIEWS = { active: "Open (not finished)", ...INCIDENT_STATUS, all: "All" } as const;
 type View = keyof typeof VIEWS;
+const FINISHED = `(${FINISHED_INCIDENT_STATUSES.join(",")})`;
 
 /**
  * What guests did to the units - mess, damage, smoking - for cleaning
@@ -38,7 +41,7 @@ export default async function IncidentsPage({
   searchParams: Promise<{ view?: string; q?: string }>;
 }) {
   const params = await searchParams;
-  const view: View = params.view && params.view in VIEWS ? (params.view as View) : "open";
+  const view: View = params.view && params.view in VIEWS ? (params.view as View) : "active";
   const supabase = await createClient();
 
   let query = supabase
@@ -49,7 +52,8 @@ export default async function IncidentsPage({
     .order("occurred_on", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(500);
-  if (view !== "all") query = query.eq("status", view);
+  if (view === "active") query = query.not("status", "in", FINISHED);
+  else if (view !== "all") query = query.eq("status", view);
   if (params.q) {
     const term = params.q.replace(/[%,()]/g, "");
     query = query.ilike("description", `%${term}%`);
@@ -58,7 +62,7 @@ export default async function IncidentsPage({
   const [profile, { data, error }, openResult] = await Promise.all([
     requireCapability("incidents.view"),
     query,
-    supabase.from("guest_incidents").select("occurred_on, charge_aed").eq("status", "open"),
+    supabase.from("guest_incidents").select("occurred_on, charge_aed").not("status", "in", FINISHED),
   ]);
 
   const incidents = data ?? [];
@@ -104,7 +108,7 @@ export default async function IncidentsPage({
               <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
               <Input name="q" defaultValue={params.q ?? ""} placeholder="Search the description" className="pl-8" />
             </div>
-            <Select name="view" defaultValue={view} className="sm:w-36">
+            <Select name="view" defaultValue={view} className="sm:w-52">
               {Object.entries(VIEWS).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
@@ -122,9 +126,9 @@ export default async function IncidentsPage({
         <EmptyState title="Could not load incidents" description={error.message} icon={<TriangleAlert className="size-8" />} />
       ) : incidents.length === 0 ? (
         <EmptyState
-          title={view === "open" ? "Nothing open" : "No incidents here"}
+          title={view === "active" ? "Nothing open" : "No incidents here"}
           description={
-            view === "open"
+            view === "active"
               ? "No guest incidents waiting on a charge or a follow-up."
               : "Nothing matches these filters."
           }
@@ -177,9 +181,7 @@ export default async function IncidentsPage({
                     {i.charge_aed != null ? <Money amount={i.charge_aed} /> : "—"}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={i.status === "open" ? "warning" : "muted"}>
-                      {INCIDENT_STATUS[i.status as keyof typeof INCIDENT_STATUS] ?? i.status}
-                    </Badge>
+                    <IncidentStatusBadge status={i.status} />
                   </TableCell>
                 </TableRow>
               ))}

@@ -246,3 +246,19 @@ export function OperatingModeBadge({ mode }: { mode: Enums<"operating_mode"> }) 
   };
   return <Badge variant={variant[mode]}>{L.OPERATING_MODE[mode]}</Badge>;
 }
+
+const incidentStatus: Record<L.IncidentStatus, Variant> = {
+  open: "warning",
+  in_progress: "brand",
+  awaiting_payment: "danger",
+  resolved: "success",
+  closed: "muted",
+};
+
+export function IncidentStatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant={incidentStatus[status as L.IncidentStatus] ?? "muted"}>
+      {L.INCIDENT_STATUS[status as L.IncidentStatus] ?? status}
+    </Badge>
+  );
+}

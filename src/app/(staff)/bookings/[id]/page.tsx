@@ -8,7 +8,7 @@ import { can } from "@/lib/auth/rbac";
 import { Callout, Field, FieldGrid, Money, PageHeader } from "@/components/domain/shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { BookingStatusBadge, ChannelBadge } from "@/components/domain/status-badge";
+import { BookingStatusBadge, ChannelBadge, IncidentStatusBadge } from "@/components/domain/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/dates";
 import { INCIDENT_CATEGORY, SALES_CHANNEL, type IncidentCategory } from "@/lib/labels";
@@ -257,9 +257,7 @@ export default async function BookingPage({
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         {i.charge_aed != null && <Money amount={i.charge_aed} />}
-                        <Badge variant={i.status === "open" ? "warning" : "muted"}>
-                          {i.status === "open" ? "Open" : "Resolved"}
-                        </Badge>
+                        <IncidentStatusBadge status={i.status} />
                       </div>
                     </li>
                   ))}

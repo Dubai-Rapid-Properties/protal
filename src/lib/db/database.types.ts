@@ -1104,6 +1104,51 @@ export type Database = {
         };
         Relationships: [];
       };
+      guest_incident_updates: {
+        Row: {
+          id: string;
+          incident_id: string;
+          author_id: string | null;
+          note: string | null;
+          status_from: string | null;
+          status_to: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          incident_id: string;
+          author_id?: string | null;
+          note?: string | null;
+          status_from?: string | null;
+          status_to?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          incident_id?: string;
+          author_id?: string | null;
+          note?: string | null;
+          status_from?: string | null;
+          status_to?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "guest_incident_updates_author_id_fkey";
+            columns: ["author_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "guest_incident_updates_incident_id_fkey";
+            columns: ["incident_id"];
+            isOneToOne: false;
+            referencedRelation: "guest_incidents";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       guest_incidents: {
         Row: {
           id: string;
@@ -5199,6 +5244,10 @@ export type Database = {
         Returns: unknown;
       };
       raise_owner_ticket: {
+        Args: Record<string, unknown>;
+        Returns: unknown;
+      };
+      set_guest_incident_status: {
         Args: Record<string, unknown>;
         Returns: unknown;
       };
