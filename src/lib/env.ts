@@ -56,11 +56,16 @@ export const env = {
   websiteApiKey: optional("WEBSITE_API_KEY"),
 
   // The D|R|P website builds its Buy / Rent pages from /api/public/listings.
-  // A Vercel deploy hook for the website project: when set, saving a listing
-  // that is (or was) on the website starts a rebuild, so the change goes
-  // live in a couple of minutes. Unset: the website updates on its next
-  // deploy.
+  // How to start a website rebuild: a deploy hook URL (Vercel, Cloudflare
+  // Workers Builds), or the website repo's GitHub dispatch URL
+  // (https://api.github.com/repos/<owner>/<repo>/dispatches) together with
+  // WEBSITE_DEPLOY_GITHUB_TOKEN. When set, saving a listing that is (or was)
+  // on the website starts a rebuild, so the change goes live in a few
+  // minutes. Unset: the website updates on its next deploy.
   websiteDeployHookUrl: optional("WEBSITE_DEPLOY_HOOK_URL"),
+  // Fine-grained GitHub token for the website repo only (Contents: read and
+  // write), needed when WEBSITE_DEPLOY_HOOK_URL is a GitHub dispatch URL.
+  websiteDeployGithubToken: optional("WEBSITE_DEPLOY_GITHUB_TOKEN"),
   // Where the website is served, for "View on the website" links.
   websiteUrl: (optional("WEBSITE_URL") ?? "https://dubairapidproperties.com").replace(/\/$/, ""),
 
