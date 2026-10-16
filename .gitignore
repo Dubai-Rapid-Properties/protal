@@ -23,3 +23,8 @@ supabase/local/pg.log
 
 # Owner lists with personal contact details - never commit
 *owners*.csv
+
+# Cloudflare (OpenNext) build output and local secrets
+/.open-next/
+/.wrangler/
+.dev.vars
