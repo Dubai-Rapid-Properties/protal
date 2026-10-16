@@ -192,7 +192,23 @@ function driverFor(channel: Channel): MessagingDriver {
   }
 }
 
+/**
+ * Addresses D|R|P never emails, whatever would send to them: a booking
+ * email, a portal invite, an owner whose record carries the office address.
+ * Migration 0040 keeps the database from queueing them too.
+ */
+export const NEVER_EMAILED: readonly string[] = ["office@dubairapidproperties.com"];
+
+/** True for an address on the never-emailed list, however it is written ("Name <x@y>", capitals, spaces). */
+export function isNeverEmailed(to: string): boolean {
+  const address = (/<([^>]+)>/.exec(to)?.[1] ?? to).trim().toLowerCase();
+  return NEVER_EMAILED.includes(address);
+}
+
 export async function sendMessage(message: OutboundMessage): Promise<SendResult> {
+  if (message.channel === "email" && isNeverEmailed(message.to)) {
+    return { ok: false, provider: "blocked", error: `Emails to ${message.to.trim()} are switched off.` };
+  }
   return driverFor(message.channel).send(message);
 }
 

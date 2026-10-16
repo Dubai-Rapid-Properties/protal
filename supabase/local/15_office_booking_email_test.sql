@@ -37,7 +37,7 @@ begin
   values ('', v_unit, 'direct', 'confirmed', current_date + 462, current_date + 464, 1)
   returning id into c;
   if not exists (select 1 from messages where booking_id = c and party_kind = 'staff'
-                  and to_address = 'office@dubairapidproperties.com') then
+                  and to_address = 'office@drp-test.ae') then
     raise exception 'TEST 121 FAILED: office not emailed when switched on';
   end if;
   raise notice 'TEST 121 PASS  office booking email sent when switched on';
