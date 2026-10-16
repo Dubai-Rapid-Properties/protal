@@ -21,6 +21,17 @@
       "service": "drp-portal"
     }
   ],
+  /* The workers.dev address stays on for testing */
+  "workers_dev": true,
+  /*
+   * The portal's addresses. Routes (not custom domains) so the existing DNS
+   * records stay: the Worker answers once a record is proxied (orange cloud),
+   * and switching the cloud off sends the address back where it pointed.
+   */
+  "routes": [
+    { "pattern": "admin.dubairapidproperties.com/*", "zone_name": "dubairapidproperties.com" },
+    { "pattern": "owner.dubairapidproperties.com/*", "zone_name": "dubairapidproperties.com" }
+  ],
   /* Variables and secrets set in the Cloudflare dashboard survive deploys */
   "keep_vars": true,
   "observability": {
