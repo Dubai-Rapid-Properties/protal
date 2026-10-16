@@ -21,6 +21,14 @@
       "service": "drp-portal"
     }
   ],
+  /*
+   * Run the Worker next to the database. Supabase is in ap-south-1 (Mumbai)
+   * and every page makes several sequential queries, so a Worker at the
+   * visitor's nearest edge pays the Dubai-to-Mumbai trip on each one. Pinned
+   * to AWS ap-south-1 it pays it once per request (as vercel.json's bom1 did).
+   * Change this together with the Supabase region.
+   */
+  "placement": { "region": "aws:ap-south-1" },
   /* The workers.dev address stays on for testing */
   "workers_dev": true,
   /*

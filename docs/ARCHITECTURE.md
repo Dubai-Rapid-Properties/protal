@@ -314,6 +314,11 @@ round trip 409 ms -> 65 ms; the unit page's full data batch ~400 ms (spikes over
 each page costs a single round trip. `scripts/copy-supabase-project.mjs` is how
 the data was moved, and can move it again.
 
+**On Cloudflare Workers** the code no longer runs in `bom1`, so `wrangler.jsonc`
+pins the Worker with `"placement": { "region": "aws:ap-south-1" }`. Without it
+the Worker runs at the visitor's nearest edge and each Supabase query crosses to
+Mumbai. If the Supabase region ever changes, change this with it.
+
 Two fixes already applied:
 
 - `current_profile()` (migration 0013) returns the signed-in user's profile in
