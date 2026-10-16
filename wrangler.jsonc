@@ -1,0 +1,29 @@
+/**
+ * Cloudflare Workers: the portal (admin. and owner.dubairapidproperties.com)
+ * runs as a Worker through the OpenNext adapter.
+ * .github/workflows/deploy-cloudflare.yml builds and deploys it (npm run
+ * deploy) on each push to main. Secrets (Supabase keys, Resend, API keys, ...)
+ * are set in the Cloudflare dashboard, never here.
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "drp-portal",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "drp-portal"
+    }
+  ],
+  /* Variables and secrets set in the Cloudflare dashboard survive deploys */
+  "keep_vars": true,
+  "observability": {
+    "enabled": true
+  }
+}

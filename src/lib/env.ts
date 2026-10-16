@@ -13,21 +13,23 @@ const optional = (key: string): string | undefined => {
 };
 
 export const env = {
-  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
+  // `||` rather than `??`: a CI build sets unused variables to "" (GitHub
+  // Actions turns an unset variable into an empty string).
+  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || "",
   // Supabase renamed its keys: new projects issue `sb_publishable_...` /
   // `sb_secret_...`, older ones the JWT-style anon / service_role pair. Both
   // names are accepted so a project of either vintage works untouched.
   // These must stay as literal process.env references - that is what lets
   // Next.js inline them into the browser bundle.
   supabaseAnonKey:
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
     "",
   supabaseServiceRoleKey:
     optional("SUPABASE_SECRET_KEY") ?? optional("SUPABASE_SERVICE_ROLE_KEY"),
 
-  appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
-  appName: process.env.NEXT_PUBLIC_APP_NAME ?? "D|R|P Property Management",
+  appUrl: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+  appName: process.env.NEXT_PUBLIC_APP_NAME || "D|R|P Property Management",
 
   // Canonical origins of the two portals. Used wherever the app has to build
   // an absolute link: invite emails, password resets, the iCal export URL.
