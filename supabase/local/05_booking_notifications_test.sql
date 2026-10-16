@@ -15,7 +15,10 @@ set client_min_messages = notice;
 
 -- These suites check what the owner and office emails say, so they are
 -- switched on here; 07 and 15 check the defaults (off).
-update company_settings set email_owners_about_bookings = true, email_office_about_bookings = true where id;
+-- The company email is a test address: the real office address is never
+-- emailed (0040).
+update company_settings set email_owners_about_bookings = true, email_office_about_bookings = true,
+       email = 'office@drp-test.ae' where id;
 
 create or replace function pg_temp.unit(num text) returns uuid
 language sql as $$ select id from units where unit_number = num $$;
@@ -56,7 +59,7 @@ begin
 
   assert (select count(*) from messages where booking_id = b and channel = 'email' and status = 'queued') = 2,
     'office + owner email queued';
-  assert exists (select 1 from messages where booking_id = b and to_address = 'office@dubairapidproperties.com'),
+  assert exists (select 1 from messages where booking_id = b and to_address = 'office@drp-test.ae'),
     'office email queued';
   select body into owner_mail from messages where booking_id = b and to_address = 'owner.b@example.com';
   assert owner_mail = owner_body, 'owner email matches the owner notification';

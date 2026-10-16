@@ -215,7 +215,8 @@ export function SettingsForm({ settings }: { settings: Tables<"company_settings"
               <span className="font-medium">Email the office about bookings</span>
               <span className="block text-xs text-[var(--muted-foreground)]">
                 New, moved and cancelled stays, sent to the company email above. Off: staff see
-                these only as portal notifications.
+                these only as portal notifications. Nothing is ever emailed to
+                office@dubairapidproperties.com.
               </span>
             </span>
           </label>

@@ -9,6 +9,7 @@ process.env.OWNER_URL = "https://owner.drp.test";
 process.env.NEXT_PUBLIC_APP_NAME = "D|R|P Property Management";
 
 const { sendQueuedEmails } = await import("@/lib/notify/email");
+const { isNeverEmailed, sendMessage } = await import("@/lib/messaging");
 
 type Row = {
   id: string;
@@ -63,7 +64,7 @@ beforeEach(() => {
     },
     {
       id: "m2", channel: "email", status: "queued", provider: null,
-      to_address: "office@dubairapidproperties.com", subject: "New booking: Marina Gate 1 2807",
+      to_address: "office@drp-test.ae", subject: "New booking: Marina Gate 1 2807",
       body: "DRP-BKG-2026-0100 - 10 Nov 2026 to 15 Nov 2026 (5 nights), via Airbnb. Price not entered yet.",
       variables: { portal: "admin", link: "/bookings/b1" }, queued_at: "2",
     },
@@ -87,7 +88,7 @@ beforeEach(() => {
 test("queued emails go out once, with a link into the recipient's own portal", async () => {
   const result = await sendQueuedEmails(fakeClient());
   assert.deepEqual(result, { sent: 2, failed: 0 });
-  assert.deepEqual(sent.map((s) => s.to[0]), ["owner.b@example.com", "office@dubairapidproperties.com"]);
+  assert.deepEqual(sent.map((s) => s.to[0]), ["owner.b@example.com", "office@drp-test.ae"]);
   assert.match(sent[0].text, /Open in the portal: https:\/\/owner\.drp\.test\/portal\/owner\/bookings/);
   assert.match(sent[1].text, /Open in the portal: https:\/\/admin\.drp\.test\/bookings\/b1/);
   assert.doesNotMatch(sent[0].text, /AED|DRP-BKG/, "owner email carries no money or booking number");
@@ -109,4 +110,15 @@ test("a provider error marks the row failed with the reason, and it is not retri
   assert.equal(rows[0].status, "failed");
   assert.equal(rows[0].error_message, "Domain not verified");
   assert.deepEqual(await sendQueuedEmails(fakeClient()), { sent: 0, failed: 0 });
+});
+
+test("the office address is never emailed, however it is written", async () => {
+  assert.equal(isNeverEmailed("office@dubairapidproperties.com"), true);
+  assert.equal(isNeverEmailed("  Office@DubaiRapidProperties.com "), true);
+  assert.equal(isNeverEmailed("D|R|P <office@dubairapidproperties.com>"), true);
+  assert.equal(isNeverEmailed("owner@example.com"), false);
+
+  const result = await sendMessage({ channel: "email", to: "Office@dubairapidproperties.com", body: "Hi" });
+  assert.equal(result.ok, false);
+  assert.equal(result.provider, "blocked");
 });
