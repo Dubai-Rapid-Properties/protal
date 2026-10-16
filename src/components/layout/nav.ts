@@ -57,6 +57,7 @@ export const STAFF_NAV: NavSection[] = [
     label: "Holiday homes",
     items: [
       { label: "Bookings", href: "/bookings", icon: "CalendarDays", capability: "bookings.view" },
+      { label: "Calendar", href: "/calendar", icon: "CalendarRange", capability: "bookings.view" },
       { label: "Calendar sync", href: "/calendar-sync", icon: "RefreshCw", capability: "bookings.view" },
     ],
   },
