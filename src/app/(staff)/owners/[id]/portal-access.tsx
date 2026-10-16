@@ -197,8 +197,8 @@ export function PortalAccess({
               </Button>
             </div>
             <p className="text-xs text-[var(--muted-foreground)]">
-              The link works once and expires after a short time (1 hour unless changed
-              in Supabase). If it expires, create a new one here.
+              The link works once and expires after 24 hours (Supabase, Authentication,
+              Email OTP expiration). If it expires, create a new one here.
             </p>
           </div>
         )}
