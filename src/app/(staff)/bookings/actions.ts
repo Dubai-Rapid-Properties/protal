@@ -1037,3 +1037,93 @@ export async function updateBookingGuest(
   revalidatePath(`/bookings/${bookingId}`);
   return { success: "Guest saved." };
 }
+
+// ---------------------------------------------------------------------------
+// Correcting a stay's dates and guest count
+// ---------------------------------------------------------------------------
+
+const staySchema = z
+  .object({
+    checkIn: isoDate,
+    checkOut: isoDate,
+    adults: z.coerce.number().int().min(1, "At least one adult").max(30),
+    children: z.coerce.number().int().min(0).max(30),
+    infants: z.coerce.number().int().min(0).max(30),
+  })
+  .refine((s) => s.checkOut > s.checkIn, { message: "Check-out must be after check-in", path: ["checkOut"] });
+
+/**
+ * Moves a stay to its real dates, or corrects the guest count. A stay synced
+ * from the Airbnb calendar is not changed here: its dates follow Airbnb and
+ * the next sync would undo the edit. The price is left as it is; if the
+ * number of nights changed, staff update it with "Enter price".
+ */
+export async function updateBookingStay(
+  bookingId: string,
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "bookings.manage")) {
+    return { error: "You do not have permission to change bookings." };
+  }
+  if (!z.string().uuid().safeParse(bookingId).success) return { error: "Booking not found." };
+
+  const parsed = staySchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form and try again." };
+  const s = parsed.data;
+
+  const supabase = await createClient();
+  const { data: booking } = await supabase
+    .from("bookings")
+    .select("id, unit_id, status, ical_uid, check_in, check_out, nightly_rate_aed")
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (!booking) return { error: "Booking not found." };
+  if (booking.ical_uid) {
+    return { error: "This stay is synced from the Airbnb calendar. Change its dates on Airbnb; the portal follows." };
+  }
+  if (booking.status === "cancelled" || booking.status === "no_show") {
+    return { error: "A cancelled stay cannot be changed." };
+  }
+
+  const datesChanged = s.checkIn !== booking.check_in || s.checkOut !== booking.check_out;
+  if (datesChanged && booking.status !== "inquiry") {
+    const holds = await blockingHolds(supabase, booking.unit_id, s.checkIn, s.checkOut);
+    if (holds.length > 0) {
+      const h = holds[0];
+      return {
+        error: `The unit is blocked from ${h.start_date} to ${h.end_date} (${h.reason.replace("_", " ")}). Remove the block or choose other dates.`,
+      };
+    }
+  }
+
+  const { data: changed, error } = await supabase
+    .from("bookings")
+    .update({
+      check_in: s.checkIn,
+      check_out: s.checkOut,
+      adults: s.adults,
+      children: s.children,
+      infants: s.infants,
+      guest_count_known: true,
+    })
+    .eq("id", bookingId)
+    .select("id");
+  if (error) return { error: explain(error) };
+  if (!changed?.length) return { error: "This booking could not be changed." };
+
+  flushEmailsSoon();
+  revalidatePath("/bookings");
+  revalidatePath(`/bookings/${bookingId}`);
+  revalidatePath(`/units/${booking.unit_id}`);
+  revalidatePath("/calendar");
+
+  const nightsChanged = nightsBetween(s.checkIn, s.checkOut) !== nightsBetween(booking.check_in, booking.check_out);
+  return {
+    success:
+      nightsChanged && Number(booking.nightly_rate_aed) > 0
+        ? "Stay saved. The number of nights changed: check the price with Enter price."
+        : "Stay saved.",
+  };
+}

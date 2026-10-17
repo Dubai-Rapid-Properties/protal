@@ -15,6 +15,7 @@ import { INCIDENT_CATEGORY, SALES_CHANNEL, type IncidentCategory } from "@/lib/l
 import { BookingActions, DeleteBookingButton } from "./booking-actions";
 import { GuestDialog } from "./guest-dialog";
 import { PriceDialog } from "./price-dialog";
+import { StayDialog } from "./stay-dialog";
 
 export const metadata = { title: "Booking" };
 
@@ -109,8 +110,24 @@ export default async function BookingPage({
 
       <div className="grid gap-5 lg:grid-cols-3">
         <Card className="lg:col-span-2">
-          <CardHeader className="pb-3">
+          <CardHeader className="flex-row items-center justify-between gap-2 pb-3">
             <CardTitle className="text-base">Stay</CardTitle>
+            {/* A stay synced from the Airbnb calendar follows Airbnb's dates */}
+            {can(profile.role, "bookings.manage") &&
+              !b.ical_uid &&
+              b.status !== "cancelled" &&
+              b.status !== "no_show" && (
+                <StayDialog
+                  bookingId={b.id}
+                  stay={{
+                    checkIn: b.check_in,
+                    checkOut: b.check_out,
+                    adults: b.adults,
+                    children: b.children,
+                    infants: b.infants,
+                  }}
+                />
+              )}
           </CardHeader>
           <CardContent>
             <FieldGrid columns={2}>
