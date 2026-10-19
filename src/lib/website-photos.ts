@@ -3,14 +3,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/db/database.types";
 import { PHOTO_BUCKET, slugify } from "@/lib/listings";
 
-/** Photos the website shows: what the public bucket (migration 0028) accepts. */
-export const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
-export const PHOTO_EXTENSIONS: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "image/avif": "avif",
-};
+import { PHOTO_EXTENSIONS } from "@/lib/website-photo-rules";
+
+export { MAX_PHOTO_BYTES, PHOTO_EXTENSIONS } from "@/lib/website-photo-rules";
 
 /**
  * Stores one photo in the portal's public bucket and returns its address.

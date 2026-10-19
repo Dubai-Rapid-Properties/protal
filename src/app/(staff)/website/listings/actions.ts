@@ -19,7 +19,6 @@ import {
 import { rebuildWebsite } from "@/lib/website";
 import { fetchPropertyFinderListings } from "./property-finder/actions";
 import { env } from "@/lib/env";
-import { MAX_PHOTO_BYTES, PHOTO_EXTENSIONS, storeWebsitePhoto } from "@/lib/website-photos";
 
 export type ListingState = { error?: string; success?: string };
 
@@ -231,18 +230,6 @@ export async function deleteListing(id: string): Promise<ListingState> {
   const rebuild = listing.status === "published" ? await rebuildWebsite() : null;
   revalidatePath("/website/listings");
   redirect(`/website/listings?saved=${listing.status !== "published" ? "deleted" : rebuild?.started ? "live" : "pending"}`);
-}
-
-/** Uploads one photo to the public bucket and returns its address. */
-export async function uploadListingPhoto(formData: FormData): Promise<{ url?: string; error?: string }> {
-  const profile = await requireEditor();
-  if (!profile) return { error: NOT_ALLOWED };
-  const file = formData.get("photo");
-  if (!(file instanceof File) || file.size === 0) return { error: "Choose a photo." };
-  if (file.size > MAX_PHOTO_BYTES) return { error: `${file.name} is larger than 10 MB.` };
-  if (!PHOTO_EXTENSIONS[file.type]) return { error: `${file.name}: use JPG, PNG, WebP or AVIF.` };
-
-  return storeWebsitePhoto(await createClient(), file, file.type, file.name);
 }
 
 /** "Update website now": a rebuild without changing anything. */

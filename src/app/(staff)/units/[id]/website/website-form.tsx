@@ -7,8 +7,8 @@ import { toast } from "sonner";
 import { FormError, FormSection, SelectField, TextAreaField, TextField } from "@/components/domain/form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { uploadListingPhoto } from "@/app/(staff)/website/listings/actions";
 import { shrinkPhoto } from "@/lib/shrink-photo";
+import { uploadWebsitePhoto } from "@/lib/website-photos-client";
 import { uploadErrorMessage } from "@/lib/upload-error";
 import { WEBSITE_AMENITIES, WEBSITE_AREAS, WEBSITE_TYPES } from "@/lib/website-options";
 import { saveUnitWebsite, type WebsiteState } from "./actions";
@@ -46,10 +46,8 @@ export function WebsiteForm({ unitId, d }: { unitId: string; d: WebsiteDefaults 
     const chosen = Array.from(files);
     setUploading((n) => n + chosen.length);
     for (const file of chosen) {
-      const data = new FormData();
-      data.set("photo", await shrinkPhoto(file));
       try {
-        const r = await uploadListingPhoto(data);
+        const r = await uploadWebsitePhoto(await shrinkPhoto(file));
         if (r.url) setImages((list) => [...list, r.url!]);
         else toast.error(r.error ?? `${file.name} was not uploaded.`);
       } catch (err) {

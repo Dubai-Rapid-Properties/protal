@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import type { TeamRow } from "@/lib/website-team";
 import { shrinkPhoto } from "@/lib/shrink-photo";
 import { uploadErrorMessage } from "@/lib/upload-error";
-import { deleteTeamMember, saveTeamMember, uploadTeamPhoto, type TeamState } from "./actions";
+import { uploadWebsitePhoto } from "@/lib/website-photos-client";
+import { deleteTeamMember, saveTeamMember, type TeamState } from "./actions";
 
 export function TeamForm({
   member,
@@ -40,10 +41,8 @@ export function TeamForm({
   async function upload(file: File | undefined) {
     if (!file) return;
     setUploading(true);
-    const data = new FormData();
-    data.set("photo", await shrinkPhoto(file));
     try {
-      const result = await uploadTeamPhoto(data);
+      const result = await uploadWebsitePhoto(await shrinkPhoto(file), `team-${file.name}`);
       if (result.url) setPhoto(result.url);
       else toast.error(result.error ?? `${file.name} was not uploaded.`);
     } catch (err) {
