@@ -27,7 +27,8 @@ import {
 } from "@/lib/listings";
 import { shrinkPhoto } from "@/lib/shrink-photo";
 import { uploadErrorMessage } from "@/lib/upload-error";
-import { deleteListing, saveListing, uploadListingPhoto, type ListingState } from "./actions";
+import { uploadWebsitePhoto } from "@/lib/website-photos-client";
+import { deleteListing, saveListing, type ListingState } from "./actions";
 
 const options = (values: readonly string[]) => values.map((v) => ({ value: v, label: v }));
 
@@ -77,12 +78,10 @@ export function ListingForm({
     if (!files?.length) return;
     const chosen = Array.from(files);
     setUploading((n) => n + chosen.length);
-    // One at a time: each request stays well under the upload size limit.
+    // One at a time, in the order chosen.
     for (const file of chosen) {
-      const data = new FormData();
-      data.set("photo", await shrinkPhoto(file));
       try {
-        const result = await uploadListingPhoto(data);
+        const result = await uploadWebsitePhoto(await shrinkPhoto(file));
         if (result.url) setImages((list) => [...list, result.url!]);
         else toast.error(result.error ?? `${file.name} was not uploaded.`);
       } catch (err) {

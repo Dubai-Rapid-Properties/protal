@@ -8,7 +8,6 @@ import { requireProfile } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
 import { slugify } from "@/lib/listings";
 import { rebuildWebsite } from "@/lib/website";
-import { MAX_PHOTO_BYTES, PHOTO_EXTENSIONS, storeWebsitePhoto } from "@/lib/website-photos";
 
 export type TeamState = { error?: string };
 
@@ -112,15 +111,4 @@ export async function deleteTeamMember(id: string): Promise<TeamState> {
   await rebuildWebsite();
   revalidatePath("/website/team");
   redirect("/website/team?saved=deleted");
-}
-
-/** Uploads a portrait to the public bucket and returns its address. */
-export async function uploadTeamPhoto(formData: FormData): Promise<{ url?: string; error?: string }> {
-  const profile = await requireEditor();
-  if (!profile) return { error: NOT_ALLOWED };
-  const file = formData.get("photo");
-  if (!(file instanceof File) || file.size === 0) return { error: "Choose a photo." };
-  if (file.size > MAX_PHOTO_BYTES) return { error: `${file.name} is larger than 10 MB.` };
-  if (!PHOTO_EXTENSIONS[file.type]) return { error: `${file.name}: use JPG, PNG, WebP or AVIF.` };
-  return storeWebsitePhoto(await createClient(), file, file.type, `team-${file.name}`);
 }
