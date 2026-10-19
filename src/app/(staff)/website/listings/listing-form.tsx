@@ -25,6 +25,7 @@ import {
   slugify,
   type ListingRow,
 } from "@/lib/listings";
+import { shrinkPhoto } from "@/lib/shrink-photo";
 import { deleteListing, saveListing, uploadListingPhoto, type ListingState } from "./actions";
 
 const options = (values: readonly string[]) => values.map((v) => ({ value: v, label: v }));
@@ -78,7 +79,7 @@ export function ListingForm({
     // One at a time: each request stays well under the upload size limit.
     for (const file of chosen) {
       const data = new FormData();
-      data.set("photo", file);
+      data.set("photo", await shrinkPhoto(file));
       try {
         const result = await uploadListingPhoto(data);
         if (result.url) setImages((list) => [...list, result.url!]);

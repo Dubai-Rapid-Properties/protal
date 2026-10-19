@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { FormError, FormSection, TextAreaField, TextField } from "@/components/domain/form";
 import { Button } from "@/components/ui/button";
 import type { TeamRow } from "@/lib/website-team";
+import { shrinkPhoto } from "@/lib/shrink-photo";
 import { deleteTeamMember, saveTeamMember, uploadTeamPhoto, type TeamState } from "./actions";
 
 export function TeamForm({
@@ -39,7 +40,7 @@ export function TeamForm({
     if (!file) return;
     setUploading(true);
     const data = new FormData();
-    data.set("photo", file);
+    data.set("photo", await shrinkPhoto(file));
     try {
       const result = await uploadTeamPhoto(data);
       if (result.url) setPhoto(result.url);
