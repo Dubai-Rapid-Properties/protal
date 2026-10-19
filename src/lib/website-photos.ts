@@ -26,9 +26,15 @@ export async function storeWebsitePhoto(
   if (!ext) return { error: `${name}: use JPG, PNG, WebP or AVIF.` };
   const base = slugify(name.replace(/\.[^.]+$/, "")).slice(0, 40) || "photo";
   const path = `${new Date().toISOString().slice(0, 7)}/${randomBytes(6).toString("hex")}-${base}.${ext}`;
-  const { error } = await supabase.storage
-    .from(PHOTO_BUCKET)
-    .upload(path, body, { contentType, cacheControl: "31536000", upsert: false });
-  if (error) return { error: `Upload failed: ${error.message}` };
-  return { url: supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl };
+  try {
+    const { error } = await supabase.storage
+      .from(PHOTO_BUCKET)
+      .upload(path, body, { contentType, cacheControl: "31536000", upsert: false });
+    if (error) return { error: `Upload failed: ${error.message}` };
+    return { url: supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl };
+  } catch (err) {
+    // Answer with the reason rather than failing the whole request, so staff see it.
+    console.error(`[photos] upload of ${name} failed:`, err);
+    return { error: `Upload failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }
