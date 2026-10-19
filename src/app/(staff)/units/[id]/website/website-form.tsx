@@ -8,6 +8,7 @@ import { FormError, FormSection, SelectField, TextAreaField, TextField } from "@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { uploadListingPhoto } from "@/app/(staff)/website/listings/actions";
+import { shrinkPhoto } from "@/lib/shrink-photo";
 import { WEBSITE_AMENITIES, WEBSITE_AREAS, WEBSITE_TYPES } from "@/lib/website-options";
 import { saveUnitWebsite, type WebsiteState } from "./actions";
 
@@ -45,7 +46,7 @@ export function WebsiteForm({ unitId, d }: { unitId: string; d: WebsiteDefaults 
     setUploading((n) => n + chosen.length);
     for (const file of chosen) {
       const data = new FormData();
-      data.set("photo", file);
+      data.set("photo", await shrinkPhoto(file));
       try {
         const r = await uploadListingPhoto(data);
         if (r.url) setImages((list) => [...list, r.url!]);
