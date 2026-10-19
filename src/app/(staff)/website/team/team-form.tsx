@@ -9,6 +9,7 @@ import { FormError, FormSection, TextAreaField, TextField } from "@/components/d
 import { Button } from "@/components/ui/button";
 import type { TeamRow } from "@/lib/website-team";
 import { shrinkPhoto } from "@/lib/shrink-photo";
+import { uploadErrorMessage } from "@/lib/upload-error";
 import { deleteTeamMember, saveTeamMember, uploadTeamPhoto, type TeamState } from "./actions";
 
 export function TeamForm({
@@ -45,8 +46,8 @@ export function TeamForm({
       const result = await uploadTeamPhoto(data);
       if (result.url) setPhoto(result.url);
       else toast.error(result.error ?? `${file.name} was not uploaded.`);
-    } catch {
-      toast.error(`${file.name} was not uploaded.`);
+    } catch (err) {
+      toast.error(uploadErrorMessage(file.name, err));
     } finally {
       setUploading(false);
       if (fileInput.current) fileInput.current.value = "";

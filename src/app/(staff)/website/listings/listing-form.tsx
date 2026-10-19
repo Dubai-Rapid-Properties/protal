@@ -26,6 +26,7 @@ import {
   type ListingRow,
 } from "@/lib/listings";
 import { shrinkPhoto } from "@/lib/shrink-photo";
+import { uploadErrorMessage } from "@/lib/upload-error";
 import { deleteListing, saveListing, uploadListingPhoto, type ListingState } from "./actions";
 
 const options = (values: readonly string[]) => values.map((v) => ({ value: v, label: v }));
@@ -84,8 +85,8 @@ export function ListingForm({
         const result = await uploadListingPhoto(data);
         if (result.url) setImages((list) => [...list, result.url!]);
         else toast.error(result.error ?? `${file.name} was not uploaded.`);
-      } catch {
-        toast.error(`${file.name} was not uploaded.`);
+      } catch (err) {
+        toast.error(uploadErrorMessage(file.name, err));
       } finally {
         setUploading((n) => n - 1);
       }

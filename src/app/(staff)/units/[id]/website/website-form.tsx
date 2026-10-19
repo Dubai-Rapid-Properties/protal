@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { uploadListingPhoto } from "@/app/(staff)/website/listings/actions";
 import { shrinkPhoto } from "@/lib/shrink-photo";
+import { uploadErrorMessage } from "@/lib/upload-error";
 import { WEBSITE_AMENITIES, WEBSITE_AREAS, WEBSITE_TYPES } from "@/lib/website-options";
 import { saveUnitWebsite, type WebsiteState } from "./actions";
 
@@ -51,8 +52,8 @@ export function WebsiteForm({ unitId, d }: { unitId: string; d: WebsiteDefaults 
         const r = await uploadListingPhoto(data);
         if (r.url) setImages((list) => [...list, r.url!]);
         else toast.error(r.error ?? `${file.name} was not uploaded.`);
-      } catch {
-        toast.error(`${file.name} was not uploaded.`);
+      } catch (err) {
+        toast.error(uploadErrorMessage(file.name, err));
       } finally {
         setUploading((n) => n - 1);
       }
