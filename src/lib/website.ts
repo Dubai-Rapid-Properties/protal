@@ -30,6 +30,8 @@ export async function rebuildWebsite(): Promise<RebuildResult> {
               Accept: "application/vnd.github+json",
               "Content-Type": "application/json",
               "X-GitHub-Api-Version": "2022-11-28",
+              // GitHub refuses requests without one (403), and a Worker's fetch sends none
+              "User-Agent": "drp-portal",
             },
             body: JSON.stringify({ event_type: "rebuild" }),
           }

@@ -36,6 +36,7 @@ test("a GitHub dispatch URL sends a rebuild event with the token", async () => {
   assert.deepEqual(result, { started: true });
   const headers = calls[0].init?.headers as Record<string, string>;
   assert.equal(headers.Authorization, "Bearer github-token");
+  assert.ok(headers["User-Agent"], "GitHub refuses requests without a User-Agent");
   assert.deepEqual(JSON.parse(String(calls[0].init?.body)), { event_type: "rebuild" });
 });
 
