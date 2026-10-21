@@ -3721,6 +3721,68 @@ export type Database = {
           },
         ];
       };
+      push_subscriptions: {
+        Row: {
+          id: string;
+          profile_id: string;
+          endpoint: string;
+          p256dh: string;
+          auth: string;
+          user_agent: string | null;
+          created_at: string;
+          last_sent_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          profile_id: string;
+          endpoint: string;
+          p256dh: string;
+          auth: string;
+          user_agent?: string | null;
+          created_at?: string;
+          last_sent_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          profile_id?: string;
+          endpoint?: string;
+          p256dh?: string;
+          auth?: string;
+          user_agent?: string | null;
+          created_at?: string;
+          last_sent_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "push_subscriptions_profile_id_fkey";
+            columns: ["profile_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      push_vapid_keys: {
+        Row: {
+          id: boolean;
+          public_key: string;
+          private_key: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: boolean;
+          public_key: string;
+          private_key: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: boolean;
+          public_key?: string;
+          private_key?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       rent_increase_notices: {
         Row: {
           id: string;
@@ -5237,6 +5299,10 @@ export type Database = {
         Args: Record<string, unknown>;
         Returns: unknown;
       };
+      delete_push_subscription: {
+        Args: Record<string, unknown>;
+        Returns: unknown;
+      };
       dismiss_channel_block: {
         Args: Record<string, unknown>;
         Returns: unknown;
@@ -5281,7 +5347,15 @@ export type Database = {
         Args: Record<string, unknown>;
         Returns: unknown;
       };
+      save_push_subscription: {
+        Args: Record<string, unknown>;
+        Returns: unknown;
+      };
       set_guest_incident_status: {
+        Args: Record<string, unknown>;
+        Returns: unknown;
+      };
+      stay_alarm_pushes: {
         Args: Record<string, unknown>;
         Returns: unknown;
       };
