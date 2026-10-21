@@ -16,12 +16,15 @@ import type { Enums } from "@/lib/db/database.types";
  * Document kinds that carry a statutory expiry. Selecting one of these makes
  * the expiry field required, which is what keeps the compliance calendar
  * complete rather than half-populated.
+ *
+ * A management agreement is not one of them: many run until either side ends
+ * them, and its renewal date (if any) lives on the agreement itself
+ * (management_agreements.end_date), which is what the compliance calendar reads.
  */
 const EXPIRING_KINDS = new Set<Enums<"document_kind">>([
   "ejari_certificate",
   "det_permit",
   "building_noc",
-  "management_agreement",
   "insurance_policy",
   "emirates_id",
   "passport",
