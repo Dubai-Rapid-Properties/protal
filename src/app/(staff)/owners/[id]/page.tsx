@@ -31,8 +31,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDate, formatPeriod } from "@/lib/dates";
-import { formatPercent } from "@/lib/money";
+import { formatAED, formatPercent } from "@/lib/money";
 import { PortalAccess } from "./portal-access";
+import { AgreementDialog, EndAgreementButton } from "./agreement-dialog";
 import { Button } from "@/components/ui/button";
 import { RecordActions } from "@/components/domain/record-actions";
 import { archiveOwner, deleteOwner, restoreOwner } from "../actions";
@@ -78,7 +79,7 @@ export default async function OwnerDetailPage({
     supabase
       .from("unit_ownerships")
       .select(
-        "ownership_pct, is_primary_contact, units(id, unit_number, status, target_annual_rent_aed, properties(name))"
+        "ownership_pct, is_primary_contact, units(id, unit_number, status, operating_mode, target_annual_rent_aed, properties(name))"
       )
       .eq("owner_id", id)
       .is("end_date", null),
@@ -264,14 +265,34 @@ export default async function OwnerDetailPage({
             </Card>
 
             <Card>
-              <CardHeader className="pb-3">
+              <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
                 <CardTitle className="text-base">Management agreements</CardTitle>
+                {can(profile.role, "owners.manage") && (
+                  <AgreementDialog
+                    ownerId={id}
+                    units={ownedUnits.flatMap((row) =>
+                      row.units
+                        ? [
+                            {
+                              id: row.units.id,
+                              label: `${row.units.properties?.name ?? "Unit"} · ${row.units.unit_number}`,
+                              mode:
+                                row.units.operating_mode === "short_term" || row.units.operating_mode === "both"
+                                  ? row.units.operating_mode
+                                  : ("long_term" as const),
+                            },
+                          ]
+                        : []
+                    )}
+                  />
+                )}
               </CardHeader>
               <CardContent className="space-y-3">
                 {agreements.length === 0 ? (
                   <p className="text-sm text-[var(--muted-foreground)]">
                     No active agreement. Owner statements will not charge a management
-                    fee until one is recorded.
+                    fee until one is recorded. Filing the signed copy under Documents
+                    does not record it: use Add agreement.
                   </p>
                 ) : (
                   agreements.map((agreement) => (
@@ -285,16 +306,22 @@ export default async function OwnerDetailPage({
                           {agreement.units?.unit_number}
                         </p>
                         <p className="text-xs text-[var(--muted-foreground)]">
+                          {agreement.agreement_number && `${agreement.agreement_number} · `}
                           {formatDate(agreement.start_date)} –{" "}
                           {formatDate(agreement.end_date)}
                           {agreement.auto_renew && " · auto-renews"}
                         </p>
                       </div>
-                      <Badge variant="brand">
-                        {agreement.commission_pct
-                          ? `${formatPercent(agreement.commission_pct)}`
-                          : "Fixed fee"}
-                      </Badge>
+                      <div className="flex items-center gap-1">
+                        <Badge variant="brand">
+                          {agreement.commission_pct
+                            ? `${formatPercent(agreement.commission_pct)}`
+                            : `Fixed fee ${formatAED(agreement.fixed_fee_aed)}`}
+                        </Badge>
+                        {can(profile.role, "owners.manage") && (
+                          <EndAgreementButton agreementId={agreement.id} ownerId={id} />
+                        )}
+                      </div>
                     </div>
                   ))
                 )}
