@@ -3,7 +3,7 @@ import { updateSession } from "@/lib/supabase/middleware";
 import { isPathAllowed, portalForRequest } from "@/lib/portal";
 import { env } from "@/lib/env";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const portal = portalForRequest(
     request.headers.get("host"),
     request.headers.get("x-forwarded-host"),
