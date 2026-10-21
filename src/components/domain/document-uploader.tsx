@@ -2,13 +2,14 @@
 
 import * as React from "react";
 import { useActionState } from "react";
-import { useFormStatus } from "react-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { uploadDocument, type UploadState } from "@/app/documents/actions";
+import { prepareDocumentUpload, uploadDocument, type UploadState } from "@/app/documents/actions";
+import { createClient } from "@/lib/supabase/client";
+import { uploadErrorMessage } from "@/lib/upload-error";
 import { DOCUMENT_KIND, optionsFrom } from "@/lib/labels";
 import type { Enums } from "@/lib/db/database.types";
 
@@ -32,15 +33,6 @@ const EXPIRING_KINDS = new Set<Enums<"document_kind">>([
   "trade_licence",
 ]);
 
-function SubmitButton() {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending}>
-      {pending ? "Uploading…" : "Upload document"}
-    </Button>
-  );
-}
-
 export function DocumentUploader({
   entityKind,
   entityId,
@@ -56,6 +48,9 @@ export function DocumentUploader({
 }) {
   const [state, action] = useActionState<UploadState, FormData>(uploadDocument, {});
   const [kind, setKind] = React.useState<Enums<"document_kind">>("other");
+  const [sending, setSending] = React.useState(false);
+  const [saving, startSaving] = React.useTransition();
+  const busy = sending || saving;
   const formRef = React.useRef<HTMLFormElement>(null);
 
   React.useEffect(() => {
@@ -69,10 +64,56 @@ export function DocumentUploader({
 
   const expiryRequired = EXPIRING_KINDS.has(kind);
 
+  /**
+   * The file goes from the browser straight to storage; only its details go through the portal's
+   * server. A large file sent through the server could hang there, or be stopped by Cloudflare's firewall.
+   */
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const data = new FormData(e.currentTarget);
+    const file = data.get("file");
+    if (!(file instanceof File) || file.size === 0) {
+      toast.error("Choose a file to upload.");
+      return;
+    }
+    setSending(true);
+    try {
+      const target = await prepareDocumentUpload({
+        entityKind,
+        entityId,
+        fileName: file.name,
+        size: file.size,
+        type: file.type,
+      });
+      if ("error" in target) {
+        toast.error(target.error);
+        return;
+      }
+      const { error } = await createClient()
+        .storage.from(target.bucket)
+        .upload(target.path, file, { cacheControl: "3600", upsert: false, contentType: file.type || undefined });
+      if (error) {
+        toast.error(`${file.name} was not uploaded: ${error.message}`);
+        return;
+      }
+      data.delete("file");
+      data.set("storagePath", target.path);
+      data.set("bucket", target.bucket);
+      data.set("fileName", file.name);
+      startSaving(() => action(data));
+    } catch (err) {
+      toast.error(uploadErrorMessage(file.name, err));
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
     <form
       ref={formRef}
       action={action}
+      // Submitted by hand: the file is uploaded first (see submit).
+      onSubmit={submit}
       className="space-y-4 rounded-lg border border-dashed border-[var(--border)] p-4"
     >
       <input type="hidden" name="entityKind" value={entityKind} />
@@ -167,7 +208,9 @@ export function DocumentUploader({
       </fieldset>
 
       <div className="flex gap-2">
-        <SubmitButton />
+        <Button type="submit" disabled={busy}>
+          {busy ? "Uploading…" : "Upload document"}
+        </Button>
         {onDone && (
           <Button type="button" variant="ghost" onClick={onDone}>
             Cancel

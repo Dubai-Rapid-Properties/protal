@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { storage, buildObjectPath, BUCKETS } from "@/lib/storage";
 import { requireProfile } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
@@ -19,12 +19,14 @@ const ACCEPTED = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
 
+const ENTITY_KINDS = [
+  "company", "property", "unit", "owner", "tenant", "guest", "lease",
+  "booking", "vendor", "maintenance_request", "service_order", "vehicle",
+  "management_agreement", "permit",
+] as const;
+
 const uploadSchema = z.object({
-  entityKind: z.enum([
-    "company", "property", "unit", "owner", "tenant", "guest", "lease",
-    "booking", "vendor", "maintenance_request", "service_order", "vehicle",
-    "management_agreement", "permit",
-  ]),
+  entityKind: z.enum(ENTITY_KINDS),
   entityId: z.string().uuid().optional(),
   unitId: z.string().uuid().optional(),
   ownerId: z.string().uuid().optional(),
@@ -41,7 +43,33 @@ const uploadSchema = z.object({
 export type UploadState = { error?: string; success?: string };
 
 /**
- * Uploads a file to the vault and records it.
+ * Step 1 of a browser upload: checks the file and the person, and says where to put it.
+ *
+ * The file itself goes from the browser straight to Supabase Storage. Sent through the portal's
+ * server instead, it crosses Cloudflare's firewall and the Worker's request limits, and a large
+ * or unlucky file can hang or be blocked. Only these few details come here.
+ */
+export async function prepareDocumentUpload(input: {
+  entityKind: string;
+  entityId?: string;
+  fileName: string;
+  size: number;
+  type: string;
+}): Promise<{ bucket: string; path: string } | { error: string }> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "documents.upload")) return { error: "You do not have permission to upload documents." };
+  const kind = z.enum(ENTITY_KINDS).safeParse(input.entityKind);
+  if (!kind.success) return { error: "Check the form and try again." };
+  if (input.entityId && !z.string().uuid().safeParse(input.entityId).success) return { error: "Check the form and try again." };
+  if (!input.size) return { error: "Choose a file to upload." };
+  if (input.size > MAX_BYTES) return { error: "That file is larger than the 25 MB limit." };
+  if (input.type && !ACCEPTED.has(input.type)) return { error: `Files of type ${input.type} are not accepted.` };
+  return { bucket: BUCKETS.documents, path: buildObjectPath(kind.data, input.entityId ?? "general", input.fileName) };
+}
+
+/**
+ * Uploads a file to the vault and records it. The file arrives in the form (older path) or, from the
+ * browser upload, is already in storage and named by `storagePath` (see prepareDocumentUpload).
  *
  * The storage object and the `documents` row are written together: if the row
  * fails, the uploaded object is removed so the bucket never accumulates files
@@ -56,15 +84,18 @@ export async function uploadDocument(
     return { error: "You do not have permission to upload documents." };
   }
 
+  const uploadedPath = formData.get("storagePath");
   const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) {
-    return { error: "Choose a file to upload." };
-  }
-  if (file.size > MAX_BYTES) {
-    return { error: "That file is larger than the 25 MB limit." };
-  }
-  if (file.type && !ACCEPTED.has(file.type)) {
-    return { error: `Files of type ${file.type} are not accepted.` };
+  if (typeof uploadedPath !== "string" || !uploadedPath) {
+    if (!(file instanceof File) || file.size === 0) {
+      return { error: "Choose a file to upload." };
+    }
+    if (file.size > MAX_BYTES) {
+      return { error: "That file is larger than the 25 MB limit." };
+    }
+    if (file.type && !ACCEPTED.has(file.type)) {
+      return { error: `Files of type ${file.type} are not accepted.` };
+    }
   }
 
   const parsed = uploadSchema.safeParse({
@@ -88,14 +119,45 @@ export async function uploadDocument(
   }
   const input = parsed.data;
 
-  const path = buildObjectPath(input.entityKind, input.entityId ?? "general", file.name);
-  let stored;
-  try {
-    stored = await storage.upload(BUCKETS.documents, path, file);
-  } catch (error) {
-    return {
-      error: error instanceof Error ? error.message : "Upload failed.",
+  let stored: Awaited<ReturnType<typeof storage.upload>>;
+  let alreadyUploaded = false;
+  if (typeof uploadedPath === "string" && uploadedPath) {
+    // The browser put the file in storage; check it is where it should be, and take its real size and type.
+    const prefix = `${input.entityKind}/${input.entityId ?? "general"}/`;
+    if (!uploadedPath.startsWith(prefix) || uploadedPath.includes("..") || formData.get("bucket") !== BUCKETS.documents) {
+      return { error: "Check the form and try again." };
+    }
+    const cut = uploadedPath.lastIndexOf("/");
+    const admin = createAdminClient();
+    const { data: found } = await admin.storage
+      .from(BUCKETS.documents)
+      .list(uploadedPath.slice(0, cut), { search: uploadedPath.slice(cut + 1), limit: 20 });
+    const object = found?.find((o) => o.name === uploadedPath.slice(cut + 1));
+    if (!object) return { error: "The file did not reach storage. Please upload it again." };
+    const size = Number((object.metadata as { size?: number } | null)?.size ?? 0);
+    const mime = (object.metadata as { mimetype?: string } | null)?.mimetype ?? null;
+    if (size > MAX_BYTES || (mime && !ACCEPTED.has(mime))) {
+      await admin.storage.from(BUCKETS.documents).remove([uploadedPath]).catch(() => {});
+      return { error: size > MAX_BYTES ? "That file is larger than the 25 MB limit." : `Files of type ${mime} are not accepted.` };
+    }
+    const typed = formData.get("fileName");
+    stored = {
+      bucket: BUCKETS.documents,
+      path: uploadedPath,
+      fileName: typeof typed === "string" && typed ? typed.slice(0, 200) : uploadedPath.slice(cut + 1),
+      mimeType: mime,
+      sizeBytes: size,
     };
+    alreadyUploaded = true;
+  } else {
+    const path = buildObjectPath(input.entityKind, input.entityId ?? "general", (file as File).name);
+    try {
+      stored = await storage.upload(BUCKETS.documents, path, file as File);
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : "Upload failed.",
+      };
+    }
   }
 
   const supabase = await createClient();
@@ -122,7 +184,8 @@ export async function uploadDocument(
 
   if (error) {
     // Roll the object back so the bucket does not drift from the table.
-    await storage.remove(stored.bucket, stored.path).catch(() => {});
+    if (alreadyUploaded) await createAdminClient().storage.from(stored.bucket).remove([stored.path]).catch(() => {});
+    else await storage.remove(stored.bucket, stored.path).catch(() => {});
     return { error: `Could not record the document: ${error.message}` };
   }
 
