@@ -24,7 +24,12 @@ const nextConfig: NextConfig = {
   // any origin other than plain localhost.
   allowedDevOrigins: ["admin.localhost", "owner.localhost", "*.localhost"],
   experimental: {
-    serverActions: { bodySizeLimit: "10mb" },
+    // Document uploads go through a server action and may be up to 25 MB
+    // (the documents bucket's limit); the form itself adds a little.
+    serverActions: { bodySizeLimit: "26mb" },
+    // The proxy (src/proxy.ts) buffers request bodies too, by default only
+    // the first 10 MB, which would cut a larger upload short.
+    proxyClientMaxBodySize: "26mb",
   },
   // Security headers for every response. On Vercel, vercel.json sets them.
   async headers() {
