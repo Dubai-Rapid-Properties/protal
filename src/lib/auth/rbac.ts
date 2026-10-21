@@ -37,6 +37,8 @@ export type Capability =
   | "ejari.manage"
   // Short term
   | "bookings.view"
+  // What a stay earns: payout, guest total and the price breakdown
+  | "bookings.revenue"
   | "bookings.manage"
   | "permits.manage"
   | "housekeeping.view"
@@ -72,7 +74,7 @@ const ALL: Capability[] = [
   "units.view", "units.manage", "properties.manage",
   "owners.view", "owners.manage", "owners.bank_details",
   "leases.view", "leases.manage", "ejari.manage",
-  "bookings.view", "bookings.manage", "permits.manage",
+  "bookings.view", "bookings.revenue", "bookings.manage", "permits.manage",
   "housekeeping.view", "housekeeping.manage",
   "finance.view", "finance.manage", "statements.view", "statements.issue",
   "maintenance.view", "maintenance.raise", "maintenance.assign", "maintenance.approve_owner",
@@ -90,7 +92,7 @@ export const CAPABILITIES: Record<Role, Capability[]> = {
     "units.view", "units.manage", "properties.manage",
     "owners.view", "owners.manage",
     "leases.view", "leases.manage", "ejari.manage",
-    "bookings.view", "bookings.manage", "permits.manage",
+    "bookings.view", "bookings.revenue", "bookings.manage", "permits.manage",
     "housekeeping.view", "housekeeping.manage",
     "finance.view", "statements.view",
     "maintenance.view", "maintenance.raise", "maintenance.assign",
@@ -104,7 +106,7 @@ export const CAPABILITIES: Record<Role, Capability[]> = {
     "units.view",
     "owners.view",
     "leases.view", "leases.manage",
-    "bookings.view", "bookings.manage",
+    "bookings.view", "bookings.revenue", "bookings.manage",
     "maintenance.view", "maintenance.raise",
     "incidents.view", "incidents.report",
     "documents.view", "documents.upload",
@@ -134,8 +136,11 @@ export const CAPABILITIES: Record<Role, Capability[]> = {
     "maintenance.raise",
   ],
 
+  // Housekeeping sees stays and their check-ins and check-outs, never what
+  // they earn.
   maintenance: [
     "units.view",
+    "bookings.view",
     "housekeeping.view", "housekeeping.manage",
     "maintenance.view", "maintenance.raise", "maintenance.assign",
     "incidents.view", "incidents.report",
@@ -147,7 +152,7 @@ export const CAPABILITIES: Record<Role, Capability[]> = {
     "units.view",
     "owners.view", "owners.manage", "owners.bank_details",
     "leases.view",
-    "bookings.view",
+    "bookings.view", "bookings.revenue",
     "finance.view", "finance.manage", "statements.view", "statements.issue",
     "maintenance.view",
     "incidents.view",
@@ -158,7 +163,7 @@ export const CAPABILITIES: Record<Role, Capability[]> = {
   // Listing content and media only - never financials.
   marketing: [
     "units.view",
-    "bookings.view",
+    "bookings.view", "bookings.revenue",
     "documents.view", "documents.upload",
     "website.manage",
     "leads.manage", "messages.send",

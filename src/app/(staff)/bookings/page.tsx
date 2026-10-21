@@ -133,7 +133,9 @@ export default async function BookingsPage({
     (b) => b.check_out > today && (b.check_in < today || b.status === "checked_in")
   ).length;
   const canManage = can(profile.role, "bookings.manage");
-  const unpriced = unpricedResult.count ?? 0;
+  // Housekeeping sees the stays, not what they earn
+  const showRevenue = can(profile.role, "bookings.revenue");
+  const unpriced = showRevenue ? (unpricedResult.count ?? 0) : 0;
 
   // The unit's primary owner, shown with each stay.
   const ownerOf = new Map((unitsResult.data ?? []).map((u) => [u.id, u.owner_name]));
@@ -149,8 +151,10 @@ export default async function BookingsPage({
     "Check-out": b.check_out,
     Nights: b.nights ?? "",
     Status: BOOKING_STATUS[b.status],
-    "Payout (AED)": b.payout_expected_aed ?? b.gross_total_aed,
-    "Guest paid (AED)": b.gross_total_aed,
+    ...(showRevenue && {
+      "Payout (AED)": b.payout_expected_aed ?? b.gross_total_aed,
+      "Guest paid (AED)": b.gross_total_aed,
+    }),
   }));
 
   return (
@@ -283,11 +287,13 @@ export default async function BookingsPage({
               ))}
             </Select>
             <Select key={view} name="view" defaultValue={view} className="sm:w-52">
-              {Object.entries(VIEWS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
+              {Object.entries(VIEWS)
+                .filter(([value]) => showRevenue || value !== "needs_price")
+                .map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
             </Select>
             <Button type="submit" variant="secondary">
               Filter
@@ -330,7 +336,7 @@ export default async function BookingsPage({
                 <TableHead>Stay</TableHead>
                 <TableHead className="hidden lg:table-cell">Channel</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="hidden text-right sm:table-cell">Payout</TableHead>
+                {showRevenue && <TableHead className="hidden text-right sm:table-cell">Payout</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -370,22 +376,24 @@ export default async function BookingsPage({
                   <TableCell>
                     <BookingStatusBadge status={b.status} />
                   </TableCell>
-                  <TableCell className="hidden text-right sm:table-cell">
-                    {Number(b.gross_total_aed) === 0 &&
-                    !Number(b.payout_expected_aed) &&
-                    b.status !== "cancelled" &&
-                    b.status !== "no_show" ? (
-                      <Link
-                        href={`/bookings/${b.id}?price=1`}
-                        className="relative z-10 text-xs text-[var(--warning)] underline underline-offset-2"
-                      >
-                        No price yet
-                      </Link>
-                    ) : (
-                      // What D|R|P receives: Airbnb's "Amount" for imported stays.
-                      <Money amount={b.payout_expected_aed ?? b.gross_total_aed} />
-                    )}
-                  </TableCell>
+                  {showRevenue && (
+                    <TableCell className="hidden text-right sm:table-cell">
+                      {Number(b.gross_total_aed) === 0 &&
+                      !Number(b.payout_expected_aed) &&
+                      b.status !== "cancelled" &&
+                      b.status !== "no_show" ? (
+                        <Link
+                          href={`/bookings/${b.id}?price=1`}
+                          className="relative z-10 text-xs text-[var(--warning)] underline underline-offset-2"
+                        >
+                          No price yet
+                        </Link>
+                      ) : (
+                        // What D|R|P receives: Airbnb's "Amount" for imported stays.
+                        <Money amount={b.payout_expected_aed ?? b.gross_total_aed} />
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
