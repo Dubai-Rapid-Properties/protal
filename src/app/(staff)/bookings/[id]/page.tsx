@@ -180,50 +180,53 @@ export default async function BookingPage({
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-2">
-          <CardHeader className="flex-row items-center justify-between gap-2 pb-3">
-            <CardTitle className="text-base">Price</CardTitle>
-            {can(profile.role, "bookings.manage") && (
-              <PriceDialog
-                bookingId={b.id}
-                isAirbnb={b.channel === "airbnb"}
-                needsGuest={!b.guests}
-                priced={Number(b.gross_total_aed) > 0 || Number(b.payout_expected_aed) > 0}
-                defaultOpen={price === "1"}
-                current={{
-                  accommodation: Number(b.accommodation_aed),
-                  cleaning: Number(b.cleaning_fee_aed),
-                  extra: Number(b.extra_fees_aed),
-                  tourism: Number(b.tourism_dirham_aed),
-                  commission: Number(b.channel_commission_aed),
-                  payout: Number(b.payout_expected_aed),
-                }}
-              />
-            )}
-          </CardHeader>
-          <CardContent>
-            <FieldGrid columns={3}>
-              <Field label="Nightly rate"><Money amount={b.nightly_rate_aed} /></Field>
-              <Field label="Accommodation"><Money amount={b.accommodation_aed} /></Field>
-              <Field label="Cleaning fee"><Money amount={b.cleaning_fee_aed} /></Field>
-              <Field label="Other fees"><Money amount={b.extra_fees_aed} /></Field>
-              <Field label="Tourism Dirham"><Money amount={b.tourism_dirham_aed} /></Field>
-              <Field label="Channel commission"><Money amount={b.channel_commission_aed} /></Field>
-              <Field label="Guest pays">
-                {/* Priced with the Airbnb payout alone: the guest total is not known yet. */}
-                {Number(b.gross_total_aed) > 0 || !Number(b.payout_expected_aed) ? (
-                  <Money amount={b.gross_total_aed} className="font-semibold" />
-                ) : (
-                  "—"
-                )}
-              </Field>
-              <Field label={b.channel === "airbnb" ? 'Payout (Airbnb "Amount")' : "Expected payout"}>
-                <Money amount={b.payout_expected_aed} />
-              </Field>
-              <Field label="Damage deposit"><Money amount={b.damage_deposit_aed} /></Field>
-            </FieldGrid>
-          </CardContent>
-        </Card>
+        {/* What the stay earns: not for housekeeping */}
+        {can(profile.role, "bookings.revenue") && (
+          <Card className="lg:col-span-2">
+            <CardHeader className="flex-row items-center justify-between gap-2 pb-3">
+              <CardTitle className="text-base">Price</CardTitle>
+              {can(profile.role, "bookings.manage") && (
+                <PriceDialog
+                  bookingId={b.id}
+                  isAirbnb={b.channel === "airbnb"}
+                  needsGuest={!b.guests}
+                  priced={Number(b.gross_total_aed) > 0 || Number(b.payout_expected_aed) > 0}
+                  defaultOpen={price === "1"}
+                  current={{
+                    accommodation: Number(b.accommodation_aed),
+                    cleaning: Number(b.cleaning_fee_aed),
+                    extra: Number(b.extra_fees_aed),
+                    tourism: Number(b.tourism_dirham_aed),
+                    commission: Number(b.channel_commission_aed),
+                    payout: Number(b.payout_expected_aed),
+                  }}
+                />
+              )}
+            </CardHeader>
+            <CardContent>
+              <FieldGrid columns={3}>
+                <Field label="Nightly rate"><Money amount={b.nightly_rate_aed} /></Field>
+                <Field label="Accommodation"><Money amount={b.accommodation_aed} /></Field>
+                <Field label="Cleaning fee"><Money amount={b.cleaning_fee_aed} /></Field>
+                <Field label="Other fees"><Money amount={b.extra_fees_aed} /></Field>
+                <Field label="Tourism Dirham"><Money amount={b.tourism_dirham_aed} /></Field>
+                <Field label="Channel commission"><Money amount={b.channel_commission_aed} /></Field>
+                <Field label="Guest pays">
+                  {/* Priced with the Airbnb payout alone: the guest total is not known yet. */}
+                  {Number(b.gross_total_aed) > 0 || !Number(b.payout_expected_aed) ? (
+                    <Money amount={b.gross_total_aed} className="font-semibold" />
+                  ) : (
+                    "—"
+                  )}
+                </Field>
+                <Field label={b.channel === "airbnb" ? 'Payout (Airbnb "Amount")' : "Expected payout"}>
+                  <Money amount={b.payout_expected_aed} />
+                </Field>
+                <Field label="Damage deposit"><Money amount={b.damage_deposit_aed} /></Field>
+              </FieldGrid>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader className="pb-3">
