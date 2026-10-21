@@ -14,7 +14,7 @@ concerns rather than free-text notes.
 
 | Layer | Choice | Note |
 |---|---|---|
-| Framework | Next.js 15 (App Router), TypeScript | Server Components + Server Actions; no separate API tier needed for the back office |
+| Framework | Next.js 16 (App Router), TypeScript | Server Components + Server Actions; no separate API tier needed for the back office |
 | Database | Supabase Postgres | Row Level Security is the access-control mechanism, not an add-on |
 | Auth | Supabase Auth | `profiles.role` drives both RLS and the UI |
 | Data access | Supabase typed client | Chosen over Drizzle deliberately — see below |
