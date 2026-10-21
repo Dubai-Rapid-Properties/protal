@@ -6,6 +6,8 @@
  *   /api/cron/ical-sync        every 15 minutes - Airbnb calendar import
  *   /api/cron/website-rebuild  every hour - website rebuild, so it shows
  *                              Property Finder's current listings
+ *   /api/cron/stay-alarms      every 2 minutes - check-out / check-in alarm
+ *                              on phones, repeated until someone presses Done
  *
  *   npm run db:cron -- --url https://admin.dubairapidproperties.com
  *   npm run db:cron -- --status      # last runs and responses
@@ -24,6 +26,7 @@ config({ path: ".env.local", quiet: true });
 const JOBS = [
   { name: "drp-ical-sync", schedule: "*/15 * * * *", path: "/api/cron/ical-sync", label: "every 15 minutes" },
   { name: "drp-website-rebuild", schedule: "23 * * * *", path: "/api/cron/website-rebuild", label: "every hour" },
+  { name: "drp-stay-alarms", schedule: "*/2 * * * *", path: "/api/cron/stay-alarms", label: "every 2 minutes" },
 ];
 const SECRET_NAME = "drp_cron_secret";
 const args = process.argv.slice(2);

@@ -2,8 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth/session";
+import { getVapidKeys, pushConfirmation } from "@/lib/push/stay-alarms";
 
 export interface AirbnbBlockAlarm {
   bookingId: string;
@@ -125,4 +126,41 @@ export async function ackStayAlarm(alarm: Pick<StayAlarm, "bookingId" | "kind" |
   });
   if (error) return { error: error.message };
   return {};
+}
+
+/** The key a device subscribes to push with; null for people the alarm is not for. */
+export async function getPushPublicKey(): Promise<string | null> {
+  const profile = await requireProfile();
+  if (!STAY_ALARM_ROLES.has(profile.role)) return null;
+  return (await getVapidKeys(createAdminClient())).publicKey;
+}
+
+const pushSubscription = z.object({
+  endpoint: z.string().url().startsWith("https://"),
+  keys: z.object({ p256dh: z.string().min(1).max(200), auth: z.string().min(1).max(100) }),
+});
+
+/**
+ * Turns the check-out / check-in alarm on for this device (0043). When
+ * `confirm`, sends it a "Phone alarm is on" notification to prove it arrives;
+ * otherwise it only re-saves the device for whoever is signed in on it now.
+ */
+export async function savePushSubscription(
+  subscription: unknown,
+  userAgent: string,
+  confirm: boolean
+): Promise<{ error?: string }> {
+  const profile = await requireProfile();
+  if (!STAY_ALARM_ROLES.has(profile.role)) return { error: "Only a super admin or housekeeping can do this." };
+  const parsed = pushSubscription.safeParse(subscription);
+  if (!parsed.success) return { error: "This browser gave an unusable push address." };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("save_push_subscription", {
+    p_endpoint: parsed.data.endpoint,
+    p_p256dh: parsed.data.keys.p256dh,
+    p_auth: parsed.data.keys.auth,
+    p_user_agent: userAgent.slice(0, 300),
+  });
+  if (error) return { error: error.message };
+  return confirm ? pushConfirmation(createAdminClient(), parsed.data.endpoint) : {};
 }
