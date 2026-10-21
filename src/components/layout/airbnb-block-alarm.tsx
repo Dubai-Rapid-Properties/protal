@@ -7,27 +7,10 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/dates";
 import { getAirbnbBlockAlarms, markAirbnbBlocked, type AirbnbBlockAlarm } from "@/app/(staff)/alarm-actions";
+import { useAlarmSound } from "./alarm-sound";
 
 const POLL_MS = 30_000;
-const RING_EVERY_MS = 4_000;
 const SILENCE_MS = 10 * 60_000;
-
-/** Two short rising tones - loud enough to notice, no sound file needed. */
-function ring(ctx: AudioContext) {
-  const now = ctx.currentTime;
-  [0, 0.35].forEach((offset, i) => {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "square";
-    osc.frequency.value = i === 0 ? 880 : 1175;
-    gain.gain.setValueAtTime(0.0001, now + offset);
-    gain.gain.exponentialRampToValueAtTime(0.25, now + offset + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.3);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(now + offset);
-    osc.stop(now + offset + 0.32);
-  });
-}
 
 /**
  * Super admins only (the layout renders it for them alone). A booking made
@@ -38,9 +21,7 @@ function ring(ctx: AudioContext) {
 export function AirbnbBlockAlarmBanner() {
   const [alarms, setAlarms] = React.useState<AirbnbBlockAlarm[]>([]);
   const [silencedUntil, setSilencedUntil] = React.useState(0);
-  const [soundBlocked, setSoundBlocked] = React.useState(false);
   const [busy, setBusy] = React.useState<string | null>(null);
-  const audio = React.useRef<AudioContext | null>(null);
 
   const load = React.useCallback(async () => {
     try {
@@ -61,38 +42,7 @@ export function AirbnbBlockAlarmBanner() {
     };
   }, [load]);
 
-  // Browsers only allow sound after the person has clicked or typed on the
-  // page, so the audio is (re)started on their first interaction.
-  React.useEffect(() => {
-    const unlock = () => {
-      audio.current ??= new AudioContext();
-      void audio.current.resume().then(() => setSoundBlocked(false));
-    };
-    window.addEventListener("pointerdown", unlock);
-    window.addEventListener("keydown", unlock);
-    return () => {
-      window.removeEventListener("pointerdown", unlock);
-      window.removeEventListener("keydown", unlock);
-    };
-  }, []);
-
-  const ringing = alarms.length > 0 && Date.now() >= silencedUntil;
-  React.useEffect(() => {
-    if (!ringing) return;
-    const tick = () => {
-      if (Date.now() < silencedUntil) return;
-      audio.current ??= new AudioContext();
-      if (audio.current.state !== "running") {
-        setSoundBlocked(true);
-        void audio.current.resume();
-        return;
-      }
-      ring(audio.current);
-    };
-    tick();
-    const timer = window.setInterval(tick, RING_EVERY_MS);
-    return () => window.clearInterval(timer);
-  }, [ringing, silencedUntil]);
+  const { soundBlocked } = useAlarmSound(alarms.length > 0 && Date.now() >= silencedUntil);
 
   if (alarms.length === 0) return null;
 

@@ -256,6 +256,10 @@ export type Database = {
           website_ref: string | null;
           airbnb_block_done_at: string | null;
           airbnb_block_done_by: string | null;
+          check_out_alarm_done: number;
+          check_out_alarm_done_by: string | null;
+          check_in_alarm_done: number;
+          check_in_alarm_done_by: string | null;
         };
         Insert: {
           id?: string;
@@ -300,6 +304,10 @@ export type Database = {
           website_ref?: string | null;
           airbnb_block_done_at?: string | null;
           airbnb_block_done_by?: string | null;
+          check_out_alarm_done?: number;
+          check_out_alarm_done_by?: string | null;
+          check_in_alarm_done?: number;
+          check_in_alarm_done_by?: string | null;
         };
         Update: {
           id?: string;
@@ -344,11 +352,29 @@ export type Database = {
           website_ref?: string | null;
           airbnb_block_done_at?: string | null;
           airbnb_block_done_by?: string | null;
+          check_out_alarm_done?: number;
+          check_out_alarm_done_by?: string | null;
+          check_in_alarm_done?: number;
+          check_in_alarm_done_by?: string | null;
         };
         Relationships: [
           {
             foreignKeyName: "bookings_airbnb_block_done_by_fkey";
             columns: ["airbnb_block_done_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "bookings_check_in_alarm_done_by_fkey";
+            columns: ["check_in_alarm_done_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "bookings_check_out_alarm_done_by_fkey";
+            columns: ["check_out_alarm_done_by"];
             isOneToOne: false;
             referencedRelation: "profiles";
             referencedColumns: ["id"];
@@ -5195,6 +5221,10 @@ export type Database = {
       };
     };
     Functions: {
+      ack_stay_alarm: {
+        Args: Record<string, unknown>;
+        Returns: unknown;
+      };
       apply_airbnb_ical: {
         Args: Record<string, unknown>;
         Returns: unknown;
@@ -5208,6 +5238,10 @@ export type Database = {
         Returns: unknown;
       };
       dismiss_channel_block: {
+        Args: Record<string, unknown>;
+        Returns: unknown;
+      };
+      due_stay_alarms: {
         Args: Record<string, unknown>;
         Returns: unknown;
       };
