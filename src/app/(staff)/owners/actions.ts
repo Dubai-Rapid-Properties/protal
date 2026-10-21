@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
+import { dubaiToday } from "@/lib/calendar";
 
 /** RLS filters rows silently: an update it refuses changes nothing and
  * reports no error, so a zero-row result is treated as refused. */
@@ -331,4 +332,128 @@ export async function deleteOwner(
 
   revalidatePath("/owners");
   redirect("/owners");
+}
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter the dates in full");
+const optionalNumber = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v) => (v ? Number(v) : null));
+
+const agreementSchema = z.object({
+  unitId: z.string().uuid("Choose the unit"),
+  serviceMode: z.enum(["long_term", "short_term", "both"]),
+  startDate: isoDate,
+  endDate: isoDate,
+  feeType: z.enum(["commission", "fixed"]),
+  commissionPct: optionalNumber,
+  fixedFeeAed: optionalNumber,
+  noticeDays: z.coerce.number().int().min(0).max(365),
+  notes: z.string().max(1000).optional(),
+});
+
+/**
+ * Records a management agreement for one of the owner's units. The owner statement reads the fee
+ * from it: without an agreement, statements charge no management fee. One active agreement per unit.
+ */
+export async function addManagementAgreement(
+  ownerId: string,
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "owners.manage")) {
+    return { error: "You do not have permission to record management agreements." };
+  }
+  if (!z.string().uuid().safeParse(ownerId).success) return { error: "Owner not found." };
+
+  const parsed = agreementSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Check the form and try again." };
+  }
+  const v = parsed.data;
+  if (v.endDate <= v.startDate) return { error: "The end date must be after the start date." };
+
+  const byPercent = v.feeType === "commission";
+  if (byPercent) {
+    if (v.commissionPct === null || !(v.commissionPct > 0 && v.commissionPct <= 100))
+      return { error: "Enter the commission as a percentage between 0 and 100." };
+  } else if (v.fixedFeeAed === null || !(v.fixedFeeAed > 0 && v.fixedFeeAed <= 10_000_000)) {
+    return { error: "Enter the fixed fee in AED." };
+  }
+
+  const supabase = await createClient();
+
+  // The unit must be one this owner holds now.
+  const { data: held } = await supabase
+    .from("unit_ownerships")
+    .select("unit_id")
+    .eq("owner_id", ownerId)
+    .eq("unit_id", v.unitId)
+    .is("end_date", null)
+    .limit(1);
+  if (!held?.length) return { error: "This owner does not hold that unit." };
+
+  // One agreement in force per unit: the unit page and the statements read a single one.
+  const { data: existing } = await supabase
+    .from("management_agreements")
+    .select("agreement_number")
+    .eq("unit_id", v.unitId)
+    .eq("is_active", true)
+    .limit(1);
+  if (existing?.length) {
+    return {
+      error: `This unit already has an active agreement${
+        existing[0].agreement_number ? ` (${existing[0].agreement_number})` : ""
+      }. End it first if this one replaces it.`,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("management_agreements")
+    .insert({
+      unit_id: v.unitId,
+      owner_id: ownerId,
+      service_mode: v.serviceMode,
+      start_date: v.startDate,
+      end_date: v.endDate,
+      commission_pct: byPercent ? v.commissionPct : null,
+      fixed_fee_aed: byPercent ? null : v.fixedFeeAed,
+      fee_vat_applicable: formData.get("feeVat") === "on",
+      auto_renew: formData.get("autoRenew") === "on",
+      notice_days: v.noticeDays,
+      notes: v.notes?.trim() || null,
+    })
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "You may not have access to record agreements for this owner." };
+
+  revalidatePath(`/owners/${ownerId}`);
+  revalidatePath(`/units/${v.unitId}`);
+  return { success: "Agreement recorded." };
+}
+
+/** Ends an agreement (renewed on other terms, or terminated): it stops being charged on statements from then on. */
+export async function endManagementAgreement(agreementId: string, ownerId: string): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "owners.manage")) {
+    return { error: "You do not have permission to change management agreements." };
+  }
+  if (!z.string().uuid().safeParse(agreementId).success) return { error: "Agreement not found." };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("management_agreements")
+    .update({ is_active: false, terminated_on: dubaiToday() })
+    .eq("id", agreementId)
+    .eq("owner_id", ownerId)
+    .eq("is_active", true)
+    .select("unit_id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "This agreement could not be changed. You may not have access to it." };
+
+  revalidatePath(`/owners/${ownerId}`);
+  revalidatePath(`/units/${data[0].unit_id}`);
+  return { success: "Agreement ended." };
 }
