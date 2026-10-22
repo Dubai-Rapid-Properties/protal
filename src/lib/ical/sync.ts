@@ -92,20 +92,39 @@ export async function syncUnit(client: Client, unitId: string, url: string): Pro
   return { unitId, ...result, errors: result.errors ?? [] };
 }
 
-/** Every active unit with an Airbnb link, a few at a time. */
-export async function syncAllUnits(client: Client, concurrency = 4): Promise<SyncResult[]> {
+/**
+ * Units the scheduled run does not start after this long, so the run ends
+ * inside the scheduler's 55-second request (scripts/setup-cron.mjs) even when
+ * the last units each wait out their 15-second feed timeout.
+ */
+const RUN_BUDGET_MS = 30_000;
+
+/**
+ * Syncs every unit with a feed, the longest-unsynced first. A run that hits
+ * its time budget leaves the rest for the next run, which starts with them.
+ * In a fixed order the same units at the end of the list missed every run
+ * that took too long.
+ */
+export async function syncAllUnits(
+  client: Client,
+  concurrency = 4,
+  budgetMs = RUN_BUDGET_MS
+): Promise<SyncResult[]> {
   const { data: units, error } = await client
     .from("units")
     .select("id, airbnb_ical_url")
     .eq("is_active", true)
-    .not("airbnb_ical_url", "is", null);
+    .not("airbnb_ical_url", "is", null)
+    .order("ical_last_synced_at", { ascending: true, nullsFirst: true });
   if (error) throw new Error(error.message);
 
+  const started = Date.now();
   const queue = [...(units ?? [])];
   const results: SyncResult[] = [];
   await Promise.all(
     Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
       for (let unit = queue.shift(); unit; unit = queue.shift()) {
+        if (Date.now() - started > budgetMs) return;
         results.push(await syncUnit(client, unit.id, unit.airbnb_ical_url!));
       }
     })
