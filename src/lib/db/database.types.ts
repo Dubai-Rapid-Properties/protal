@@ -236,6 +236,7 @@ export type Database = {
           channel_commission_aed: number;
           gross_total_aed: number;
           payout_expected_aed: number | null;
+          payout_kept: boolean;
           damage_deposit_aed: number;
           damage_deposit_status: Database["public"]["Enums"]["deposit_status"];
           quoted_currency: string;
@@ -286,6 +287,7 @@ export type Database = {
           channel_commission_aed?: number;
           gross_total_aed?: number;
           payout_expected_aed?: number | null;
+          payout_kept?: boolean;
           damage_deposit_aed?: number;
           damage_deposit_status?: Database["public"]["Enums"]["deposit_status"];
           quoted_currency?: string;
@@ -336,6 +338,7 @@ export type Database = {
           channel_commission_aed?: number;
           gross_total_aed?: number;
           payout_expected_aed?: number | null;
+          payout_kept?: boolean;
           damage_deposit_aed?: number;
           damage_deposit_status?: Database["public"]["Enums"]["deposit_status"];
           quoted_currency?: string;
@@ -5342,6 +5345,10 @@ export type Database = {
       link_channel_stay: {
         Args: Record<string, unknown>;
         Returns: unknown;
+      };
+      move_booking: {
+        Args: { p_booking_id: string; p_unit_id: string };
+        Returns: undefined;
       };
       mark_airbnb_blocked: {
         Args: Record<string, unknown>;

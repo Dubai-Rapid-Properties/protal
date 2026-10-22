@@ -1127,3 +1127,107 @@ export async function updateBookingStay(
         : "Stay saved.",
   };
 }
+
+const moveSchema = z.object({ unitId: z.string().uuid("Choose the unit the guest stays in.") });
+
+/**
+ * Moves a stay to the unit the guest really stays in (move_booking, 0047):
+ * its calendar hold, turnover clean and income go with it. A stay from the
+ * old unit's Airbnb calendar stays on that listing; that calendar's sync
+ * skips it from now on.
+ */
+export async function moveBooking(
+  bookingId: string,
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "bookings.manage")) {
+    return { error: "You do not have permission to change bookings." };
+  }
+  if (!z.string().uuid().safeParse(bookingId).success) return { error: "Booking not found." };
+  const parsed = moveSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Choose a unit." };
+
+  const supabase = await createClient();
+  const { data: booking } = await supabase.from("bookings").select("unit_id").eq("id", bookingId).maybeSingle();
+  if (!booking) return { error: "Booking not found." };
+
+  const { error } = await supabase.rpc("move_booking", { p_booking_id: bookingId, p_unit_id: parsed.data.unitId });
+  if (error) return { error: explain(error) };
+  // A stay that already ended moves its income line to the new owner now.
+  await supabase.rpc("post_completed_bookings");
+
+  revalidatePath("/bookings");
+  revalidatePath(`/bookings/${bookingId}`);
+  revalidatePath(`/units/${booking.unit_id}`);
+  revalidatePath(`/units/${parsed.data.unitId}`);
+  revalidatePath("/calendar");
+  return { success: "Stay moved. The calendar, cleaning and owner income follow it." };
+}
+
+const keptPayoutSchema = z.object({
+  payout: money,
+  reason: z.string().max(300).optional(),
+});
+
+/**
+ * A guest cancelled but the channel still pays (a strict cancellation
+ * policy): the stay is cancelled - its dates are free again - and its payout
+ * still posts to the owner's income on the check-out day (0047). On a stay
+ * already cancelled this records or changes the kept payout; 0 removes it.
+ */
+export async function cancelKeepingPayout(
+  bookingId: string,
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "bookings.manage") || !can(profile.role, "bookings.revenue")) {
+    return { error: "You do not have permission to change booking payouts." };
+  }
+  if (!z.string().uuid().safeParse(bookingId).success) return { error: "Booking not found." };
+  const parsed = keptPayoutSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Enter the payout." };
+  const { payout, reason } = parsed.data;
+
+  const supabase = await createClient();
+  const { data: booking } = await supabase
+    .from("bookings")
+    .select("id, unit_id, status")
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (!booking) return { error: "Booking not found." };
+  const cancelling = (["inquiry", "tentative", "confirmed"] as string[]).includes(booking.status);
+  if (!cancelling && booking.status !== "cancelled") {
+    return { error: "Only an upcoming or cancelled stay can keep its payout this way." };
+  }
+  if (cancelling && payout <= 0) return { error: "Enter the payout the channel still pays." };
+
+  const { data: changed, error } = await supabase
+    .from("bookings")
+    .update({
+      payout_kept: payout > 0,
+      ...(payout > 0 ? { payout_expected_aed: round2(payout) } : {}),
+      ...(cancelling
+        ? { status: "cancelled" as const, cancelled_on: dubaiToday(), cancellation_reason: reason || null }
+        : {}),
+    })
+    .eq("id", bookingId)
+    .select("id");
+  if (error) return { error: explain(error) };
+  if (!changed?.length) return { error: "This booking could not be changed." };
+  await supabase.rpc("post_completed_bookings");
+
+  flushEmailsSoon();
+  revalidatePath("/bookings");
+  revalidatePath(`/bookings/${bookingId}`);
+  revalidatePath(`/units/${booking.unit_id}`);
+  return {
+    success: cancelling
+      ? "Booking cancelled. The dates are free; the payout still goes to the owner's income."
+      : payout > 0
+        ? "Kept payout saved."
+        : "Kept payout removed.",
+  };
+}
