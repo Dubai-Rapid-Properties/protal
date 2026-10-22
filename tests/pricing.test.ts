@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { airbnbRateNear, quoteStay, stayDiscountPct } from "@/lib/pricing";
+import { airbnbRateNear, formPriceDefaults, quoteStay, stayDiscountPct } from "@/lib/pricing";
 
 // 2026-10-05 is a Monday.
 const rates = { nightly: 340, weekend: 347, weeklyDiscountPct: 5, monthlyDiscountPct: 15 };
@@ -55,4 +55,37 @@ test("airbnbRateNear averages the Airbnb stays closest to the dates, by night", 
   });
   assert.equal(airbnbRateNear(stays, "2026-10-01")?.stays, 3);
   assert.equal(airbnbRateNear([], "2026-10-01"), null);
+});
+
+const unitRates = { weekendRate: 347, weeklyDiscountPct: 5, monthlyDiscountPct: 15 };
+
+test("a form follows the unit's weekend rate and long-stay discount until staff type their own nightly rate", () => {
+  assert.deepEqual(formPriceDefaults({ ownRate: false, fromAirbnb: false, nights: 30, unit: unitRates }), {
+    weekendRate: "347",
+    discountPct: 15,
+  });
+  assert.deepEqual(formPriceDefaults({ ownRate: false, fromAirbnb: false, nights: 3, unit: unitRates }), {
+    weekendRate: "347",
+    discountPct: 0,
+  });
+});
+
+test("a nightly rate staff type is charged on every night: no weekend rate and no discount on top", () => {
+  const defaults = formPriceDefaults({ ownRate: true, fromAirbnb: false, nights: 30, unit: unitRates });
+  assert.deepEqual(defaults, { weekendRate: "", discountPct: 0 });
+  // A direct client at AED 450 a night, Thu 8 Oct -> Sun 15 Nov 2026 (38 nights, weekends included).
+  const q = quoteStay("2026-10-08", "2026-11-15", { nightly: 450, weekend: Number(defaults.weekendRate) }, defaults.discountPct);
+  assert.equal(q.nights, 38);
+  assert.equal(q.accommodation, 38 * 450);
+});
+
+test("an Airbnb average already carries weekends and long-stay discounts", () => {
+  assert.deepEqual(formPriceDefaults({ ownRate: false, fromAirbnb: true, nights: 30, unit: unitRates }), {
+    weekendRate: "",
+    discountPct: 0,
+  });
+  assert.deepEqual(formPriceDefaults({ ownRate: false, fromAirbnb: false, nights: 5, unit: null }), {
+    weekendRate: "",
+    discountPct: 0,
+  });
 });

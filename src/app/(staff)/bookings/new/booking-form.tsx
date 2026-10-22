@@ -14,7 +14,7 @@ import {
 import { Callout } from "@/components/domain/shared";
 import { createBooking, type ActionState } from "../actions";
 import { SALES_CHANNEL, optionsFrom } from "@/lib/labels";
-import { airbnbRateNear, quoteStay, stayDiscountPct, type PricedStay } from "@/lib/pricing";
+import { airbnbRateNear, formPriceDefaults, quoteStay, type PricedStay } from "@/lib/pricing";
 import { formatDate } from "@/lib/dates";
 import { formatAED } from "@/lib/money";
 
@@ -92,13 +92,16 @@ export function BookingForm({
   const fromAirbnb = Boolean(airbnb) && !useUnitRate;
   const autoRate = fromAirbnb ? String(airbnb!.rate) : unit?.nightlyRate ? String(unit.nightlyRate) : "";
   const rateValue = rate ?? autoRate;
-  const weekendValue = weekendRate ?? (fromAirbnb ? "" : unit?.weekendRate ? String(unit.weekendRate) : "");
-  const autoDiscount = validDates && unit && !fromAirbnb
-    ? stayDiscountPct(quoteStay(checkIn, checkOut, { nightly: 0 }).nights, {
-        weeklyDiscountPct: unit.weeklyDiscountPct,
-        monthlyDiscountPct: unit.monthlyDiscountPct,
-      })
-    : 0;
+  // Staff typed their own nightly rate: it is the price of every night (see formPriceDefaults).
+  const ownRate = rate !== null;
+  const defaults = formPriceDefaults({
+    ownRate,
+    fromAirbnb,
+    nights: validDates ? quoteStay(checkIn, checkOut, { nightly: 0 }).nights : 0,
+    unit: unit ?? null,
+  });
+  const weekendValue = weekendRate ?? defaults.weekendRate;
+  const autoDiscount = validDates ? defaults.discountPct : 0;
   const discountValue = discount ?? (autoDiscount ? String(autoDiscount) : "");
   const quote = validDates
     ? quoteStay(checkIn, checkOut, { nightly: num(rateValue), weekend: num(weekendValue) }, num(discountValue))
@@ -208,7 +211,7 @@ export function BookingForm({
 
       <FormSection
         title="Price (AED)"
-        description="The nightly rate starts from what Airbnb guests paid a night at this unit around these dates; the other prices come from the unit (Units → Edit). Type over any of them. Tourism Dirham is collected for the government and not paid out."
+        description="The nightly rate starts from what Airbnb guests paid a night at this unit around these dates; the other prices come from the unit (Units → Edit). Type over any of them: a nightly rate you type is charged for every night, with no weekend rate or discount unless you add one. Tourism Dirham is collected for the government and not paid out."
         columns={3}
       >
         <TextField
@@ -256,8 +259,10 @@ export function BookingForm({
                   </>
                 ) : null}
               </>
-            ) : (
+            ) : weekendValue ? (
               "Sunday to Thursday nights"
+            ) : (
+              "Every night, Friday and Saturday too (unless you set a weekend rate)"
             )
           }
         />

@@ -108,3 +108,23 @@ export function airbnbRateNear(stays: PricedStay[], day: string, count = 5): Air
     to: nearest.reduce((m, s) => (s.checkOut > m ? s.checkOut : m), nearest[0].checkOut),
   };
 }
+
+/**
+ * What a booking form starts the weekend rate and the stay discount from. Typing your own nightly rate
+ * means that rate for every night, as agreed with the guest (a direct client's per-day rate): the unit's
+ * weekend rate and weekly/monthly discount then stay off until staff type them. Otherwise they follow the
+ * unit, except under an Airbnb average, which already mixes weekends and long-stay discounts.
+ */
+export function formPriceDefaults(opts: {
+  ownRate: boolean;
+  fromAirbnb: boolean;
+  nights: number;
+  unit: { weekendRate: number | null; weeklyDiscountPct: number | null; monthlyDiscountPct: number | null } | null;
+}): { weekendRate: string; discountPct: number } {
+  const { ownRate, fromAirbnb, nights, unit } = opts;
+  if (ownRate || fromAirbnb || !unit) return { weekendRate: "", discountPct: 0 };
+  return {
+    weekendRate: unit.weekendRate ? String(unit.weekendRate) : "",
+    discountPct: stayDiscountPct(nights, unit),
+  };
+}
