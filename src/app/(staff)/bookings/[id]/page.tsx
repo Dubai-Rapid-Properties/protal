@@ -18,6 +18,7 @@ import { KeptPayoutDialog } from "./kept-payout-dialog";
 import { MoveDialog } from "./move-dialog";
 import { PriceDialog } from "./price-dialog";
 import { StayDialog } from "./stay-dialog";
+import { TimesDialog } from "./times-dialog";
 
 export const metadata = { title: "Booking" };
 
@@ -150,6 +151,9 @@ export default async function BookingPage({
                   units={(otherUnits ?? []).map((u) => ({ id: u.id!, label: `${u.property_name} · ${u.unit_number}` }))}
                 />
               )}
+              {movable && (
+                <TimesDialog bookingId={b.id} checkInTime={b.check_in_time} checkOutTime={b.check_out_time} />
+              )}
               {/* A stay synced from the Airbnb calendar follows Airbnb's dates */}
               {canManage &&
                 !b.ical_uid &&
@@ -189,8 +193,18 @@ export default async function BookingPage({
                 )}
               </Field>
               <Field label="Nights">{b.nights}</Field>
-              <Field label="Check-in">{formatDate(b.check_in)}</Field>
-              <Field label="Check-out">{formatDate(b.check_out)}</Field>
+              <Field label="Check-in">
+                {formatDate(b.check_in)}
+                {b.check_in_time
+                  ? ` · ${b.check_in_time.slice(0, 5)}${b.check_in_time < "15:00" ? " (early)" : ""}`
+                  : " · from 15:00"}
+              </Field>
+              <Field label="Check-out">
+                {formatDate(b.check_out)}
+                {b.check_out_time
+                  ? ` · ${b.check_out_time.slice(0, 5)}${b.check_out_time > "12:00" ? " (late)" : ""}`
+                  : " · by 12:00"}
+              </Field>
               <Field label="Guests">{guestCount}</Field>
               <Field label="Channel">
                 {SALES_CHANNEL[b.channel]}

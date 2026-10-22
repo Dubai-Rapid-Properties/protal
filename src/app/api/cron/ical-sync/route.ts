@@ -2,11 +2,13 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { syncAllUnits } from "@/lib/ical/sync";
+import { syncBookingsSheet } from "@/lib/sheet/sync";
 import { sendQueuedEmails } from "@/lib/notify/email";
 import { env } from "@/lib/env";
 
 /**
- * Airbnb calendar import for every unit with a feed link. Called every 15
+ * The admin team's bookings sheet, then the Airbnb calendar import for every
+ * unit with a feed link. Called every 15
  * minutes by Supabase pg_cron (see supabase/cron/ical_sync.sql) - Vercel's
  * Hobby plan only allows daily crons.
  *
@@ -35,6 +37,8 @@ async function handle(request: NextRequest) {
   const started = Date.now();
   try {
     const client = createAdminClient();
+    // The sheet first: one quick read, before the feeds use up the time.
+    const sheet = env.bookingsSheet ? await syncBookingsSheet(client, env.bookingsSheet) : null;
     const results = await syncAllUnits(client);
     // New imports queue booking emails; send them, plus anything a staff
     // action queued that was not sent at the time.
@@ -50,6 +54,13 @@ async function handle(request: NextRequest) {
       cancelled: results.reduce((n, r) => n + (r.cancelled ?? 0), 0),
       emails,
       ledgerPosted: posted ?? 0,
+      sheet: sheet && {
+        ok: sheet.ok,
+        created: sheet.created,
+        updated: sheet.updated,
+        cancelled: sheet.cancelled,
+        problems: sheet.problems.length,
+      },
       ms: Date.now() - started,
       errors: failed.map((r) => ({ unitId: r.unitId, errors: r.errors.slice(0, 3) })),
     });

@@ -1231,3 +1231,44 @@ export async function cancelKeepingPayout(
         : "Kept payout removed.",
   };
 }
+
+const clock = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Enter a time like 10:00")
+  .optional()
+  .or(z.literal("").transform(() => undefined));
+const timesSchema = z.object({ checkInTime: clock, checkOutTime: clock });
+
+/**
+ * An early check-in or a late check-out agreed with the guest. Empty means
+ * the standard 15:00 / 12:00. The alarms ring at these times and the
+ * turnover clean starts at the check-out time (0048). Allowed on stays
+ * synced from Airbnb too: the calendar feed carries no times.
+ */
+export async function updateStayTimes(
+  bookingId: string,
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "bookings.manage")) {
+    return { error: "You do not have permission to change bookings." };
+  }
+  if (!z.string().uuid().safeParse(bookingId).success) return { error: "Booking not found." };
+  const parsed = timesSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the times." };
+  const { checkInTime, checkOutTime } = parsed.data;
+
+  const supabase = await createClient();
+  const { data: changed, error } = await supabase
+    .from("bookings")
+    .update({ check_in_time: checkInTime ?? null, check_out_time: checkOutTime ?? null })
+    .eq("id", bookingId)
+    .select("unit_id");
+  if (error) return { error: explain(error) };
+  if (!changed?.length) return { error: "This booking could not be changed." };
+
+  revalidatePath(`/bookings/${bookingId}`);
+  revalidatePath(`/units/${changed[0].unit_id}`);
+  return { success: "Times saved. The alarms and the cleaning follow them." };
+}

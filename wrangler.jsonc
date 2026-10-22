@@ -42,6 +42,10 @@
   ],
   /* Variables and secrets set in the Cloudflare dashboard survive deploys */
   "keep_vars": true,
+  "vars": {
+    /* The admin team's bookings sheet, read every 15 minutes (src/lib/sheet/sync.ts) */
+    "BOOKINGS_SHEET": "10vH_buFA4eEM-xvQIiS4vq688IIb4_NGuW4KUqv4QMM"
+  },
   "observability": {
     "enabled": true
   }
