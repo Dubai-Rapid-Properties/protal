@@ -57,6 +57,12 @@ export const env = {
   // (Supabase pg_cron) sends it as "Authorization: Bearer <secret>".
   cronSecret: optional("CRON_SECRET"),
 
+  // The admin team's bookings sheet (a Google Sheets link or ID, shared as
+  // "anyone with the link can view"). The calendar cron brings its direct
+  // and old-Airbnb-account stays into the portal (src/lib/sheet/sync.ts).
+  // Unset: no sheet sync.
+  bookingsSheet: optional("BOOKINGS_SHEET"),
+
   // Shared secret the Holiday Homes website sends ("Authorization: Bearer ...")
   // to create and update bookings through /api/public/bookings. Without it
   // those endpoints refuse every request; the read-only ones stay public.

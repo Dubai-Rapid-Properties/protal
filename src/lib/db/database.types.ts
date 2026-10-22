@@ -237,6 +237,7 @@ export type Database = {
           gross_total_aed: number;
           payout_expected_aed: number | null;
           payout_kept: boolean;
+          sheet_name: string | null;
           damage_deposit_aed: number;
           damage_deposit_status: Database["public"]["Enums"]["deposit_status"];
           quoted_currency: string;
@@ -288,6 +289,7 @@ export type Database = {
           gross_total_aed?: number;
           payout_expected_aed?: number | null;
           payout_kept?: boolean;
+          sheet_name?: string | null;
           damage_deposit_aed?: number;
           damage_deposit_status?: Database["public"]["Enums"]["deposit_status"];
           quoted_currency?: string;
@@ -339,6 +341,7 @@ export type Database = {
           gross_total_aed?: number;
           payout_expected_aed?: number | null;
           payout_kept?: boolean;
+          sheet_name?: string | null;
           damage_deposit_aed?: number;
           damage_deposit_status?: Database["public"]["Enums"]["deposit_status"];
           quoted_currency?: string;
@@ -578,6 +581,39 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      bookings_sheet_sync: {
+        Row: {
+          id: boolean;
+          synced_at: string;
+          ok: boolean;
+          rows_read: number;
+          created: number;
+          updated: number;
+          cancelled: number;
+          problems: Json;
+        };
+        Insert: {
+          id?: boolean;
+          synced_at?: string;
+          ok?: boolean;
+          rows_read?: number;
+          created?: number;
+          updated?: number;
+          cancelled?: number;
+          problems?: Json;
+        };
+        Update: {
+          id?: boolean;
+          synced_at?: string;
+          ok?: boolean;
+          rows_read?: number;
+          created?: number;
+          updated?: number;
+          cancelled?: number;
+          problems?: Json;
+        };
+        Relationships: [];
       };
       channel_stay_links: {
         Row: {
