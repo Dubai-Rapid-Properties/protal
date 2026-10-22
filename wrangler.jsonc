@@ -44,7 +44,9 @@
   "keep_vars": true,
   "vars": {
     /* The admin team's bookings sheet, read every 15 minutes (src/lib/sheet/sync.ts) */
-    "BOOKINGS_SHEET": "10vH_buFA4eEM-xvQIiS4vq688IIb4_NGuW4KUqv4QMM"
+    "BOOKINGS_SHEET": "10vH_buFA4eEM-xvQIiS4vq688IIb4_NGuW4KUqv4QMM",
+    /* Owners choose a password from their invite link (src/lib/env.ts) */
+    "OWNER_PASSWORDS": "on"
   },
   "observability": {
     "enabled": true

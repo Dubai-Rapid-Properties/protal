@@ -44,8 +44,7 @@ export const env = {
 
   // Owner passwords. Off (default): a sign-in link logs the owner straight
   // into the portal. On: owners choose a password from the link and must have
-  // one to use the portal. Switch on with OWNER_PASSWORDS=on in Vercel, then
-  // redeploy.
+  // one to use the portal. On: OWNER_PASSWORDS=on in wrangler.jsonc.
   ownerPasswords: optional("OWNER_PASSWORDS") === "on",
 
   // How long an owner's sign-in link works, in hours. It must match Supabase
