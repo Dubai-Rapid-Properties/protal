@@ -32,8 +32,9 @@ export default async function StaffLayout({
         badges={{ "/notifications": unread }}
       />
       <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
-        {profile.role === "super_admin" && <AirbnbBlockAlarmBanner />}
-        {(profile.role === "super_admin" || profile.role === "maintenance") && (
+        {/* An account with alarms off (0045) gets notifications only */}
+        {profile.role === "super_admin" && !profile.alarms_off && <AirbnbBlockAlarmBanner />}
+        {(profile.role === "super_admin" || profile.role === "maintenance") && !profile.alarms_off && (
           <>
             <StayAlarmBanner />
             <PhoneAlarmSetup />
