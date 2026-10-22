@@ -12,9 +12,25 @@ export interface PushMessage {
   /** One notification per ring: a repeat replaces it and rings again. */
   tag: string;
   url: string;
-  /** Present on alarms: the "Done" button answers this ring. */
-  ack?: { bookingId: string; kind: "check_out" | "check_in"; stage: 1 | 2 };
+  /** Present on alarms: the "Done" button answers this ring (or these, for tomorrow's check-ins). */
+  ack?: Ack | Ack[];
 }
+
+type Kind = "check_out" | "check_in" | "prepare";
+type Ack = { bookingId: string; kind: Kind; stage: 1 | 2 };
+
+type Ring = {
+  subscription_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  booking_id: string;
+  booking_number: string;
+  unit_label: string;
+  kind: Kind;
+  stage: 1 | 2;
+  due_at: string;
+};
 
 /** Push services want a way to reach the sender: the portal's address. */
 const subject = () => (env.adminUrl.startsWith("https://") ? env.adminUrl : "mailto:office@dubairapidproperties.com");
@@ -39,14 +55,23 @@ export async function getVapidKeys(admin: Client): Promise<VapidKeys> {
   return { publicKey: data.public_key, privateKey: data.private_key };
 }
 
-function alarmMessage(r: {
-  booking_id: string;
-  booking_number: string;
-  unit_label: string;
-  kind: "check_out" | "check_in";
-  stage: 1 | 2;
-  due_at: string;
-}): PushMessage {
+/**
+ * Tomorrow's check-ins, as one notification per phone: housekeeping gets the
+ * units ready the day before, and "Done" answers them all.
+ */
+function prepareMessage(rings: Ring[]): PushMessage {
+  const units = rings.map((r) => r.unit_label);
+  const n = rings.length;
+  return {
+    title: `Tomorrow: ${n} check-in${n === 1 ? "" : "s"} to get ready`,
+    body: units.length > 4 ? `${units.slice(0, 4).join(", ")} and ${units.length - 4} more` : units.join(", "),
+    tag: "prepare-tomorrow",
+    url: "/bookings",
+    ack: rings.map((r) => ({ bookingId: r.booking_id, kind: r.kind, stage: r.stage })),
+  };
+}
+
+function alarmMessage(r: Ring): PushMessage {
   const what = r.kind === "check_out" ? "Check-out" : "Check-in";
   return {
     title: r.stage === 1 ? `${what} in 1 hour (${r.due_at})` : `${what} now (${r.due_at})`,
@@ -77,26 +102,20 @@ export async function pushStayAlarms(admin: Client) {
   const { data, error } = await admin.rpc("stay_alarm_pushes");
   if (error) throw new Error(error.message);
   // The generated types leave function results untyped; this is its row.
-  const rows = (data ?? []) as unknown as {
-    subscription_id: string;
-    endpoint: string;
-    p256dh: string;
-    auth: string;
-    booking_id: string;
-    booking_number: string;
-    unit_label: string;
-    kind: "check_out" | "check_in";
-    stage: 1 | 2;
-    due_at: string;
-  }[];
+  const rows = (data ?? []) as unknown as Ring[];
   if (rows.length === 0) return { sent: 0, gone: 0, failed: 0, errors: [] as string[] };
 
+  /* Today's check-outs and check-ins one by one; tomorrow's as one list per phone */
+  const target = (r: Ring) => ({ id: r.subscription_id, endpoint: r.endpoint, p256dh: r.p256dh, auth: r.auth });
+  const prepare = new Map<string, Ring[]>();
+  for (const r of rows) if (r.kind === "prepare") prepare.set(r.subscription_id, [...(prepare.get(r.subscription_id) ?? []), r]);
+  const messages = [
+    ...rows.filter((r) => r.kind !== "prepare").map((r) => [target(r), alarmMessage(r)] as const),
+    ...[...prepare.values()].map((rings) => [target(rings[0]), prepareMessage(rings)] as const),
+  ];
+
   const keys = await getVapidKeys(admin);
-  const results = await Promise.all(
-    rows.map((r) =>
-      deliver(admin, keys, { id: r.subscription_id, endpoint: r.endpoint, p256dh: r.p256dh, auth: r.auth }, alarmMessage(r))
-    )
-  );
+  const results = await Promise.all(messages.map(([to, message]) => deliver(admin, keys, to, message)));
   const errors = results.flatMap((r) => (typeof r === "object" ? [r.error] : []));
   return {
     sent: results.filter((r) => r === "sent").length,

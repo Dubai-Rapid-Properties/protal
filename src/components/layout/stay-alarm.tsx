@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { BellRing, Check, DoorClosed, DoorOpen } from "lucide-react";
+import { BedDouble, BellRing, Check, DoorClosed, DoorOpen } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ackStayAlarm, getStayAlarms, type StayAlarm } from "@/app/(staff)/alarm-actions";
@@ -13,6 +13,7 @@ const POLL_MS = 30_000;
 const key = (a: StayAlarm) => `${a.bookingId}:${a.kind}:${a.stage}`;
 
 function label(a: StayAlarm) {
+  if (a.kind === "prepare") return `Check-in tomorrow (${a.dueAt}): get the unit ready`;
   const what = a.kind === "check_out" ? "Check-out" : "Check-in";
   return a.stage === 1 ? `${what} in 1 hour (${a.dueAt})` : `${what} now (${a.dueAt})`;
 }
@@ -66,7 +67,11 @@ export function StayAlarmBanner() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="flex items-center gap-2 font-semibold">
           <BellRing className="size-5 animate-bounce" />
-          {alarms.length === 1 ? "Check-out / check-in today" : `${alarms.length} check-outs / check-ins today`}
+          {alarms.every((a) => a.kind === "prepare")
+            ? `${alarms.length} check-in${alarms.length === 1 ? "" : "s"} tomorrow to get ready`
+            : alarms.length === 1
+              ? "Check-out / check-in today"
+              : `${alarms.length} check-outs / check-ins`}
         </p>
         {soundBlocked && (
           <span className="text-xs text-[var(--muted-foreground)]">Click anywhere to turn the alarm sound on</span>
@@ -79,7 +84,13 @@ export function StayAlarmBanner() {
             className="flex flex-col gap-2 rounded-md bg-[var(--warning)]/15 p-2 text-sm sm:flex-row sm:items-center sm:justify-between"
           >
             <p className="flex flex-wrap items-center gap-x-1">
-              {a.kind === "check_out" ? <DoorOpen className="size-4" /> : <DoorClosed className="size-4" />}
+              {a.kind === "check_out" ? (
+                <DoorOpen className="size-4" />
+              ) : a.kind === "prepare" ? (
+                <BedDouble className="size-4" />
+              ) : (
+                <DoorClosed className="size-4" />
+              )}
               <span className="font-medium">{label(a)}</span> · <span>{a.unit}</span>
               {a.guest && ` · ${a.guest}`} ·{" "}
               <Link href={`/bookings/${a.bookingId}`} className="underline underline-offset-2">

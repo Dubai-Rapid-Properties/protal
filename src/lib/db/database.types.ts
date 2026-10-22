@@ -260,6 +260,8 @@ export type Database = {
           check_out_alarm_done_by: string | null;
           check_in_alarm_done: number;
           check_in_alarm_done_by: string | null;
+          prepare_alarm_done: number;
+          prepare_alarm_done_by: string | null;
         };
         Insert: {
           id?: string;
@@ -308,6 +310,8 @@ export type Database = {
           check_out_alarm_done_by?: string | null;
           check_in_alarm_done?: number;
           check_in_alarm_done_by?: string | null;
+          prepare_alarm_done?: number;
+          prepare_alarm_done_by?: string | null;
         };
         Update: {
           id?: string;
@@ -356,6 +360,8 @@ export type Database = {
           check_out_alarm_done_by?: string | null;
           check_in_alarm_done?: number;
           check_in_alarm_done_by?: string | null;
+          prepare_alarm_done?: number;
+          prepare_alarm_done_by?: string | null;
         };
         Relationships: [
           {
@@ -375,6 +381,13 @@ export type Database = {
           {
             foreignKeyName: "bookings_check_out_alarm_done_by_fkey";
             columns: ["check_out_alarm_done_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "bookings_prepare_alarm_done_by_fkey";
+            columns: ["prepare_alarm_done_by"];
             isOneToOne: false;
             referencedRelation: "profiles";
             referencedColumns: ["id"];
