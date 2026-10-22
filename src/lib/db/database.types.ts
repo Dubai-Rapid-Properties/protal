@@ -3607,6 +3607,7 @@ export type Database = {
           locale: string;
           job_title: string | null;
           is_active: boolean;
+          alarms_off: boolean;
           last_login_at: string | null;
           created_at: string;
           updated_at: string;
@@ -3622,6 +3623,7 @@ export type Database = {
           locale?: string;
           job_title?: string | null;
           is_active?: boolean;
+          alarms_off?: boolean;
           last_login_at?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -3637,6 +3639,7 @@ export type Database = {
           locale?: string;
           job_title?: string | null;
           is_active?: boolean;
+          alarms_off?: boolean;
           last_login_at?: string | null;
           created_at?: string;
           updated_at?: string;
