@@ -5,9 +5,12 @@ import {
   matchBooking,
   matchUnit,
   parseBookingsSheet,
+  parseSheetAmount,
   parseSheetDate,
   parseSheetTime,
   sheetCsvUrl,
+  sheetMayPrice,
+  sheetPrice,
   type PortalBooking,
   type PortalUnit,
 } from "@/lib/sheet/bookings-sheet";
@@ -133,4 +136,33 @@ test("bookings: the one typed in for the stay, never a feed booking", () => {
     ])?.id,
     "live"
   );
+});
+
+test("the nightly rate column prices the stay by the night, nothing on top", () => {
+  const { rows } = parseBookingsSheet(
+    "GUEST,Check IN,Check OUT,Apartment Number,Source,Direct Booking Rate (night)\n" +
+      'Andy,21-Nov-2026,28-Nov-2026,3302,Private Guest,680.95\nMark,15-Jan-2027,29-Jan-2027,208,Private Guest,"1,150"\nNone,1-Dec-2026,2-Dec-2026,208,Private Guest,\n'
+  );
+  assert.deepEqual(rows.map((r) => r.nightlyRate), [680.95, 1150, null]);
+  assert.equal(parseSheetAmount("AED 233.33"), 233.33);
+  assert.equal(parseSheetAmount("tbc"), null);
+  assert.equal(parseSheetAmount("0"), null);
+  assert.deepEqual(sheetPrice(680.95, 7), {
+    nightlyRate: 680.95,
+    accommodation: 4766.65,
+    cleaning: 0,
+    extra: 0,
+    tourism: 0,
+    commission: 0,
+    gross: 4766.65,
+    payout: 4766.65,
+  });
+});
+
+test("the sheet prices unpriced or rate-only bookings, never a full price entered on purpose", () => {
+  assert.equal(sheetMayPrice(undefined), true);
+  assert.equal(sheetMayPrice({ ...sheetPrice(500, 3), payout: null }), true);
+  assert.equal(sheetMayPrice(sheetPrice(500, 3)), true, "priced by the rate before: follows a new rate");
+  assert.equal(sheetMayPrice({ ...sheetPrice(500, 3), cleaning: 150, gross: 1650, payout: 1650 }), false);
+  assert.equal(sheetMayPrice({ ...sheetPrice(500, 3), commission: 225, payout: 1275 }), false, "a channel payout");
 });

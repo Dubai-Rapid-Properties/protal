@@ -6,8 +6,8 @@
  * The sheet's columns, matched by their header:
  *   GUEST | Activity type | Check IN | Check OUT | Location | Apartment Number
  *   | Source | Comments
- * plus, optionally, "Check IN time" / "Check OUT time" (early check-in, late
- * check-out, e.g. 10:00).
+ * plus, optionally, "Direct Booking Rate (night)" (AED a night) and "Check IN
+ * time" / "Check OUT time" (early check-in, late check-out, e.g. 10:00).
  */
 import { parseCsv } from "@/lib/airbnb/earnings-csv";
 import { rangesOverlap } from "@/lib/calendar";
@@ -29,6 +29,8 @@ export interface SheetRow {
   ownerStay: boolean;
   checkInTime: string | null;
   checkOutTime: string | null;
+  /** AED a night, from the rate column; null when empty. */
+  nightlyRate: number | null;
   comments: string;
 }
 
@@ -66,6 +68,14 @@ export function parseSheetDate(value: string): string | null {
   const date = new Date(Date.UTC(y, m - 1, d));
   if (date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) return null;
   return date.toISOString().slice(0, 10);
+}
+
+/** "540", "1,150.62", "AED 233.33" -> the amount; empty, zero or text -> null. */
+export function parseSheetAmount(value: string): number | null {
+  const v = value.replace(/aed|dhs?|,|\s/gi, "");
+  if (!/^\d+(\.\d+)?$/.test(v)) return null;
+  const n = Math.round(Number(v) * 100) / 100;
+  return n > 0 && n < 1_000_000 ? n : null;
 }
 
 /** "10:00", "9:30", "10am", "4 PM" -> "HH:MM"; anything else null. */
@@ -114,6 +124,7 @@ export function parseBookingsSheet(text: string): SheetParseResult {
     comments: col(/comment|note/),
     checkInTime: col(/^check\s*-?\s*in.*time/),
     checkOutTime: col(/^check\s*-?\s*out.*time/),
+    rate: col(/rate|price/),
   };
   for (const key of ["guest", "checkIn", "checkOut", "apartment"] as const) {
     if (at[key] < 0) return { rows: [], problems: [`The sheet has no "${key}" column; nothing was read.`] };
@@ -154,6 +165,7 @@ export function parseBookingsSheet(text: string): SheetParseResult {
       ownerStay: channel !== null && /^\s*owner'?s?\s*stay\b/i.test(comments),
       checkInTime: parseSheetTime(cell(r, at.checkInTime)),
       checkOutTime: parseSheetTime(cell(r, at.checkOutTime)),
+      nightlyRate: parseSheetAmount(cell(r, at.rate)),
       comments,
     });
   });
@@ -227,7 +239,50 @@ export interface PortalBooking {
   icalUid: string | null;
   checkInTime?: string | null;
   checkOutTime?: string | null;
+  price?: StayPrice;
 }
+
+/** A booking's price columns, as AED. */
+export interface StayPrice {
+  nightlyRate: number | null;
+  accommodation: number;
+  cleaning: number;
+  extra: number;
+  tourism: number;
+  commission: number;
+  gross: number;
+  payout: number | null;
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** The price of a stay at the sheet's nightly rate: the nights, nothing on top. */
+export function sheetPrice(rate: number, nights: number): StayPrice {
+  const total = round2(rate * nights);
+  return { nightlyRate: rate, accommodation: total, cleaning: 0, extra: 0, tourism: 0, commission: 0, gross: total, payout: total };
+}
+
+/**
+ * The sheet's rate may price a booking that has no price yet, or one priced
+ * by the rate alone before (by the sheet, or by hand the same way). A price
+ * with fees, commission or a channel payout was entered on purpose - from
+ * the reservation or the earnings export - and is left alone.
+ */
+export function sheetMayPrice(p: StayPrice | undefined): boolean {
+  if (!p || !p.payout) return true;
+  return (
+    p.cleaning === 0 &&
+    p.extra === 0 &&
+    p.tourism === 0 &&
+    p.commission === 0 &&
+    Math.abs(p.gross - p.accommodation) < 0.01 &&
+    Math.abs(p.payout - p.gross) < 0.01
+  );
+}
+
+/** Does the booking already carry this price? */
+export const samePrice = (a: StayPrice | undefined, b: StayPrice) =>
+  Boolean(a) && a!.nightlyRate === b.nightlyRate && Math.abs(a!.accommodation - b.accommodation) < 0.01 && a!.payout === b.payout;
 
 export const sheetName = (guest: string) => guest.toLowerCase().replace(/\s+/g, " ").trim();
 const firstName = (name: string | null) => (name ?? "").toLowerCase().match(/[\p{L}]+/u)?.[0] ?? "";
