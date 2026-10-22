@@ -1,15 +1,19 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/db/database.types";
-import { addDays, dubaiToday, rangesOverlap } from "@/lib/calendar";
+import { addDays, dubaiToday, nightsBetween, rangesOverlap } from "@/lib/calendar";
 import {
   matchBooking,
   matchUnit,
   parseBookingsSheet,
+  samePrice,
   sheetCsvUrl,
+  sheetMayPrice,
   sheetName,
+  sheetPrice,
   type PortalBooking,
   type PortalUnit,
   type SheetRow,
+  type StayPrice,
 } from "./bookings-sheet";
 
 type Client = SupabaseClient<Database>;
@@ -82,7 +86,9 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
       if (!bookingsOf.has(unitId)) {
         const { data, error } = await client
           .from("bookings")
-          .select("id, status, check_in, check_out, check_in_time, check_out_time, sheet_name, ical_uid, guests(full_name)")
+          .select(
+            "id, status, check_in, check_out, check_in_time, check_out_time, sheet_name, ical_uid, guests(full_name), nightly_rate_aed, accommodation_aed, cleaning_fee_aed, extra_fees_aed, tourism_dirham_aed, channel_commission_aed, gross_total_aed, payout_expected_aed"
+          )
           .eq("unit_id", unitId)
           .gte("check_out", addDays(today, -60));
         if (error) throw new Error(error.message);
@@ -98,6 +104,16 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
             icalUid: b.ical_uid,
             checkInTime: b.check_in_time?.slice(0, 5) ?? null,
             checkOutTime: b.check_out_time?.slice(0, 5) ?? null,
+            price: {
+              nightlyRate: b.nightly_rate_aed == null ? null : Number(b.nightly_rate_aed),
+              accommodation: Number(b.accommodation_aed),
+              cleaning: Number(b.cleaning_fee_aed),
+              extra: Number(b.extra_fees_aed),
+              tourism: Number(b.tourism_dirham_aed),
+              commission: Number(b.channel_commission_aed),
+              gross: Number(b.gross_total_aed),
+              payout: b.payout_expected_aed == null ? null : Number(b.payout_expected_aed),
+            },
           }))
         );
       }
@@ -148,7 +164,18 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
         // Times only when the sheet gives them: staff may have set them here.
         if (row.checkInTime && row.checkInTime !== match.checkInTime) changes.check_in_time = row.checkInTime;
         if (row.checkOutTime && row.checkOutTime !== match.checkOutTime) changes.check_out_time = row.checkOutTime;
-        const meaningful = Boolean(changes.status || changes.check_in || changes.check_in_time || changes.check_out_time);
+        // The sheet's nightly rate, over the stay's (new) nights.
+        let price: StayPrice | null = null;
+        if (row.nightlyRate && !changes.status && sheetMayPrice(match.price)) {
+          const wanted = sheetPrice(row.nightlyRate, nightsBetween(row.checkIn, row.checkOut));
+          if (!samePrice(match.price, wanted)) {
+            price = wanted;
+            Object.assign(changes, priceColumns(wanted));
+          }
+        }
+        const meaningful = Boolean(
+          changes.status || changes.check_in || changes.check_in_time || changes.check_out_time || price
+        );
         if (!meaningful && !changes.sheet_name) continue;
 
         const { error } = await client.from("bookings").update(changes).eq("id", match.id);
@@ -163,6 +190,7 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
           checkOut: changes.check_out ?? match.checkOut,
           checkInTime: changes.check_in_time ?? match.checkInTime,
           checkOutTime: changes.check_out_time ?? match.checkOutTime,
+          price: price ?? match.price,
         });
         if (changes.status) result.cancelled++;
         else if (meaningful) result.updated++;
@@ -191,6 +219,7 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
           check_out: row.checkOut,
           check_in_time: row.checkInTime,
           check_out_time: row.checkOutTime,
+          ...(row.nightlyRate ? priceColumns(sheetPrice(row.nightlyRate, nightsBetween(row.checkIn, row.checkOut))) : {}),
           adults: 1,
           guest_count_known: false,
           guest_id: guest.id,
@@ -235,6 +264,18 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
   });
   return result;
 }
+
+/** A sheet price as the booking's columns. */
+const priceColumns = (p: StayPrice) => ({
+  nightly_rate_aed: p.nightlyRate,
+  accommodation_aed: p.accommodation,
+  cleaning_fee_aed: p.cleaning,
+  extra_fees_aed: p.extra,
+  tourism_dirham_aed: p.tourism,
+  channel_commission_aed: p.commission,
+  gross_total_aed: p.gross,
+  payout_expected_aed: p.payout,
+});
 
 /** Owner stays on the sheet ("OWNER STAY" in the comments) are calendar blocks. */
 async function applyOwnerStay(
