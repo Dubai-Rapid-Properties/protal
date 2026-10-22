@@ -196,13 +196,13 @@ export default async function BookingPage({
               <Field label="Check-in">
                 {formatDate(b.check_in)}
                 {b.check_in_time
-                  ? ` · ${b.check_in_time.slice(0, 5)}${b.check_in_time < "15:00" ? " (early)" : ""}`
+                  ? ` · ${b.check_in_time.slice(0, 5)}${b.check_in_time.slice(0, 5) < "15:00" ? " (early)" : ""}`
                   : " · from 15:00"}
               </Field>
               <Field label="Check-out">
                 {formatDate(b.check_out)}
                 {b.check_out_time
-                  ? ` · ${b.check_out_time.slice(0, 5)}${b.check_out_time > "12:00" ? " (late)" : ""}`
+                  ? ` · ${b.check_out_time.slice(0, 5)}${b.check_out_time.slice(0, 5) > "12:00" ? " (late)" : ""}`
                   : " · by 12:00"}
               </Field>
               <Field label="Guests">{guestCount}</Field>
