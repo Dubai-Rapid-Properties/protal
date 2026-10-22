@@ -162,7 +162,8 @@ export default async function DashboardPage() {
         description="Portfolio health, compliance exposure and the last 30 days."
       />
 
-      {can(profile.role, "bookings.view") && (
+      {/* Housekeeping's day: what to clean and get ready */}
+      {profile.role === "maintenance" && (
         <StayMovements today={today} tomorrow={tomorrow} movements={movements} />
       )}
 
