@@ -18,6 +18,8 @@ export type PortalAccessState = {
   mailtoUrl?: string;
   /** The portal can send the branded email itself (Resend is set up). */
   canEmail?: boolean;
+  /** How long the link works (env.ownerLinkValidHours). */
+  linkValidHours?: number;
 };
 
 const emailConfigured = () =>
@@ -158,6 +160,7 @@ export async function grantPortalAccess(
     portalUrl: env.ownerUrl,
     company: await companyForInvite(supabase),
     mode: env.ownerPasswords ? "password" : "link",
+    linkValidHours: env.ownerLinkValidHours,
   });
 
   const phone = owner.whatsapp ?? owner.phone;
@@ -167,6 +170,7 @@ export async function grantPortalAccess(
     link,
     email,
     canEmail: emailConfigured(),
+    linkValidHours: env.ownerLinkValidHours,
     whatsappUrl: phone
       ? `https://wa.me/${toE164(phone).replace("+", "")}?text=${encodeURIComponent(invite.text)}`
       : undefined,
@@ -219,6 +223,7 @@ export async function emailPortalInvite(
     portalUrl: env.ownerUrl,
     company: await companyForInvite(supabase),
     mode: env.ownerPasswords ? "password" : "link",
+    linkValidHours: env.ownerLinkValidHours,
   });
   const result = await sendMessage({
     channel: "email",

@@ -129,6 +129,7 @@ export default async function OwnerUnitPage({
             blocks={blocks}
             monthHref={(m) => calendarHref(m, months)}
             spanHref={(n) => calendarHref(month, n)}
+            forOwner
           />
         </CardContent>
       </Card>

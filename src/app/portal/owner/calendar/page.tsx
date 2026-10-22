@@ -103,6 +103,7 @@ export default async function OwnerCalendarPage({
                     .map((b) => ({ id: b.id!, start: b.start_date!, end: b.end_date!, reason: b.reason! }))}
                   monthHref={(m) => calendarHref(m, months)}
                   spanHref={(n) => calendarHref(month, n)}
+                  forOwner
                 />
                 {units.length === 1 && (
                   <p className="mt-3 text-sm text-[var(--muted-foreground)]">
