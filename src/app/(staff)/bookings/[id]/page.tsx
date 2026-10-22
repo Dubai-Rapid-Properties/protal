@@ -14,6 +14,8 @@ import { formatDate } from "@/lib/dates";
 import { INCIDENT_CATEGORY, SALES_CHANNEL, type IncidentCategory } from "@/lib/labels";
 import { BookingActions, DeleteBookingButton } from "./booking-actions";
 import { GuestDialog } from "./guest-dialog";
+import { KeptPayoutDialog } from "./kept-payout-dialog";
+import { MoveDialog } from "./move-dialog";
 import { PriceDialog } from "./price-dialog";
 import { StayDialog } from "./stay-dialog";
 
@@ -43,7 +45,9 @@ export default async function BookingPage({
   ]);
   if (!b) notFound();
   const canSeeIncidents = can(profile.role, "incidents.view");
-  const [{ data: unitOwner }, { data: incidents }] = await Promise.all([
+  const canManage = can(profile.role, "bookings.manage");
+  const movable = canManage && ["inquiry", "tentative", "confirmed", "checked_in"].includes(b.status);
+  const [{ data: unitOwner }, { data: incidents }, { data: otherUnits }] = await Promise.all([
     supabase.from("v_units_overview").select("owner_id, owner_name").eq("id", b.unit_id).maybeSingle(),
     canSeeIncidents
       ? supabase
@@ -51,6 +55,17 @@ export default async function BookingPage({
           .select("id, occurred_on, category, description, charge_aed, status")
           .eq("booking_id", b.id)
           .order("occurred_on", { ascending: false })
+      : Promise.resolve({ data: null }),
+    // Where the stay can be moved to
+    movable
+      ? supabase
+          .from("v_units_overview")
+          .select("id, unit_number, property_name")
+          .eq("is_active", true)
+          .in("operating_mode", ["short_term", "both"])
+          .neq("id", b.unit_id)
+          .order("property_name")
+          .order("unit_number")
       : Promise.resolve({ data: null }),
   ]);
 
@@ -72,7 +87,16 @@ export default async function BookingPage({
         description={`${b.booking_number} · ${unitLabel}`}
         actions={
           <>
-            {can(profile.role, "bookings.manage") && <BookingActions bookingId={b.id} status={b.status} />}
+            {canManage && <BookingActions bookingId={b.id} status={b.status} />}
+            {canManage &&
+              can(profile.role, "bookings.revenue") &&
+              ["inquiry", "tentative", "confirmed", "cancelled"].includes(b.status) && (
+                <KeptPayoutDialog
+                  bookingId={b.id}
+                  cancelled={b.status === "cancelled"}
+                  payout={b.status !== "cancelled" || b.payout_kept ? Number(b.payout_expected_aed) || 0 : 0}
+                />
+              )}
             {profile.role === "super_admin" && (
               <DeleteBookingButton
                 bookingId={b.id}
@@ -104,6 +128,12 @@ export default async function BookingPage({
         <div className="mb-5">
           <Callout tone="warning" title={`Cancelled on ${formatDate(b.cancelled_on)}`}>
             {b.cancellation_reason || "No reason recorded."}
+            {b.payout_kept && can(profile.role, "bookings.revenue") && (
+              <>
+                {" "}The channel still pays <Money amount={b.payout_expected_aed} />: it goes to the
+                owner&apos;s income on {formatDate(b.check_out)}.
+              </>
+            )}
           </Callout>
         </div>
       )}
@@ -112,22 +142,31 @@ export default async function BookingPage({
         <Card className="lg:col-span-2">
           <CardHeader className="flex-row items-center justify-between gap-2 pb-3">
             <CardTitle className="text-base">Stay</CardTitle>
-            {/* A stay synced from the Airbnb calendar follows Airbnb's dates */}
-            {can(profile.role, "bookings.manage") &&
-              !b.ical_uid &&
-              b.status !== "cancelled" &&
-              b.status !== "no_show" && (
-                <StayDialog
+            <div className="flex gap-2">
+              {movable && (
+                <MoveDialog
                   bookingId={b.id}
-                  stay={{
-                    checkIn: b.check_in,
-                    checkOut: b.check_out,
-                    adults: b.adults,
-                    children: b.children,
-                    infants: b.infants,
-                  }}
+                  synced={Boolean(b.ical_uid)}
+                  units={(otherUnits ?? []).map((u) => ({ id: u.id!, label: `${u.property_name} · ${u.unit_number}` }))}
                 />
               )}
+              {/* A stay synced from the Airbnb calendar follows Airbnb's dates */}
+              {canManage &&
+                !b.ical_uid &&
+                b.status !== "cancelled" &&
+                b.status !== "no_show" && (
+                  <StayDialog
+                    bookingId={b.id}
+                    stay={{
+                      checkIn: b.check_in,
+                      checkOut: b.check_out,
+                      adults: b.adults,
+                      children: b.children,
+                      infants: b.infants,
+                    }}
+                  />
+                )}
+            </div>
           </CardHeader>
           <CardContent>
             <FieldGrid columns={2}>
