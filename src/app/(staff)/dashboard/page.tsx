@@ -27,6 +27,7 @@ import { COMPLIANCE_KIND } from "@/lib/labels";
 import { formatAED } from "@/lib/money";
 import { addDays, dubaiToday } from "@/lib/calendar";
 import { summariseStays } from "@/lib/stays-summary";
+import { StayMovements, type Movement } from "./stay-movements";
 
 export const metadata = { title: "Dashboard" };
 
@@ -37,13 +38,14 @@ export default async function DashboardPage() {
   const { start, end } = rollingWindow(30);
   const today = dubaiToday();
   const stayFrom = addDays(today, -29);
+  const tomorrow = addDays(today, 1);
 
   // Every query below runs as the signed-in user, so a property manager sees
   // only their assigned buildings without any extra filtering here.
   // The profile check travels in the same batch as the data: RLS already
   // guards every query, so waiting for the profile first would only add a
   // full round trip to the database region.
-  const [profile, unitsResult, complianceResult, ledgerResult, maintenanceResult, staysResult] =
+  const [profile, unitsResult, complianceResult, ledgerResult, maintenanceResult, staysResult, movementsResult] =
     await Promise.all([
       requireProfile(),
       supabase
@@ -79,6 +81,16 @@ export default async function DashboardPage() {
         .in("status", ["confirmed", "checked_in", "checked_out"])
         .lte("check_in", today)
         .gt("check_out", stayFrom),
+
+      // Check-ins and check-outs today and tomorrow
+      supabase
+        .from("bookings")
+        .select(
+          "id, unit_id, check_in, check_out, check_in_time, check_out_time, adults, children, guest_count_known, guests(full_name), units(unit_number, properties(name))"
+        )
+        .in("status", ["confirmed", "checked_in", "checked_out"])
+        .or(`check_in.in.(${today},${tomorrow}),check_out.in.(${today},${tomorrow})`)
+        .order("check_in"),
     ]);
 
   const units = unitsResult.data ?? [];
@@ -131,12 +143,28 @@ export default async function DashboardPage() {
 
   const showFinance = can(profile.role, "finance.view");
 
+  const movements: Movement[] = (movementsResult.data ?? []).map((b) => ({
+    id: b.id,
+    unitId: b.unit_id,
+    unit: `${b.units?.properties?.name ?? ""} ${b.units?.unit_number ?? ""}`.trim(),
+    guest: b.guests?.full_name ?? null,
+    checkIn: b.check_in,
+    checkOut: b.check_out,
+    checkInTime: b.check_in_time,
+    checkOutTime: b.check_out_time,
+    guests: b.guest_count_known ? b.adults + b.children : null,
+  }));
+
   return (
     <>
       <PageHeader
         title={`Good day, ${(profile.full_name || "there").split(" ")[0]}`}
         description="Portfolio health, compliance exposure and the last 30 days."
       />
+
+      {can(profile.role, "bookings.view") && (
+        <StayMovements today={today} tomorrow={tomorrow} movements={movements} />
+      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
