@@ -46,6 +46,9 @@ const BLOCK_LABEL: Record<Enums<"block_reason">, string> = {
   channel_sync: "Blocked on Airbnb",
 };
 
+/* Owners took "Blocked on Airbnb" for an Airbnb booking: to them it is just a period the unit is not available */
+const OWNER_BLOCK_LABEL: Record<Enums<"block_reason">, string> = { ...BLOCK_LABEL, channel_sync: "Not available" };
+
 const sourceTone = (source: Enums<"sales_channel">) =>
   source === "airbnb"
     ? "bg-rose-500/15 text-rose-800 dark:text-rose-200 border-rose-500/50"
@@ -81,6 +84,7 @@ export function BookingCalendar({
   blocks = [],
   monthHref,
   spanHref,
+  forOwner = false,
 }: {
   month: string;
   months?: number;
@@ -88,6 +92,8 @@ export function BookingCalendar({
   blocks?: CalendarBlock[];
   monthHref: (month: string) => string;
   spanHref?: (months: MonthSpan) => string;
+  /** The owner portal's calendar: blocks are named for owners */
+  forOwner?: boolean;
 }) {
   const today = dubaiToday();
   const shown = Array.from({ length: months }, (_, i) => shiftMonth(month, i));
@@ -143,7 +149,7 @@ export function BookingCalendar({
         {shown.map((m) => (
           <div key={m}>
             {months > 1 && <h4 className="mb-2 text-sm font-medium">{formatMonth(`${m}-01`)}</h4>}
-            <MonthGrid month={m} today={today} stays={stays} blocks={blocks} />
+            <MonthGrid month={m} today={today} stays={stays} blocks={blocks} labels={forOwner ? OWNER_BLOCK_LABEL : BLOCK_LABEL} />
           </div>
         ))}
       </div>
@@ -165,11 +171,13 @@ function MonthGrid({
   today,
   stays,
   blocks,
+  labels,
 }: {
   month: string;
   today: string;
   stays: CalendarStay[];
   blocks: CalendarBlock[];
+  labels: Record<Enums<"block_reason">, string>;
 }) {
   const weeks = monthGrid(month);
 
@@ -212,7 +220,7 @@ function MonthGrid({
                 `${stay.checkIn} → ${stay.checkOut} · ${nightsBetween(stay.checkIn, stay.checkOut)} nights` +
                 (stay.label ? ` · ${stay.label}` : "")
               : block
-                ? `${BLOCK_LABEL[block.reason]} · ${block.start} → ${block.end}` +
+                ? `${labels[block.reason]} · ${block.start} → ${block.end}` +
                   (block.note ? ` · ${block.note}` : "")
                 : undefined;
 
@@ -230,7 +238,7 @@ function MonthGrid({
             const label = stay
               ? (stay.label ?? SALES_CHANNEL[stay.source])
               : block
-                ? (block.note ?? BLOCK_LABEL[block.reason])
+                ? (block.note ?? labels[block.reason])
                 : null;
             const barText = realStart ? (
               <>

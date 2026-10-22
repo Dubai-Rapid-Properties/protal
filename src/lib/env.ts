@@ -48,6 +48,11 @@ export const env = {
   // redeploy.
   ownerPasswords: optional("OWNER_PASSWORDS") === "on",
 
+  // How long an owner's sign-in link works, in hours. It must match Supabase
+  // -> Authentication -> Email -> "Email OTP Expiration" (86400 seconds = 24
+  // hours, the longest it allows); invites and the owner page say this many.
+  ownerLinkValidHours: Number(optional("OWNER_LINK_VALID_HOURS") ?? 24),
+
   // Shared secret for the scheduled endpoints (/api/cron/*). The scheduler
   // (Supabase pg_cron) sends it as "Authorization: Bearer <secret>".
   cronSecret: optional("CRON_SECRET"),
