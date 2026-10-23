@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireCapability, getCompanySettings } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
-import { PageHeader } from "@/components/domain/shared";
+import { Money, PageHeader } from "@/components/domain/shared";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatementStatusBadge } from "@/components/domain/status-badge";
 import { StatementDocument } from "@/components/domain/statement-document";
 import { StatementActions } from "./statement-actions";
@@ -50,6 +51,10 @@ export default async function StatementDetailPage({
   ]);
 
   if (!statement) notFound();
+  const otherCharges = (Array.isArray(statement.other_charges) ? statement.other_charges : []) as {
+    description: string;
+    amount: number;
+  }[];
 
   return (
     <>
@@ -73,6 +78,30 @@ export default async function StatementDetailPage({
         <div className="mb-5">
           <StatementStatusBadge status={statement.status} />
         </div>
+        {otherCharges.length > 0 && (
+          <Card className="mb-5">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Other fees</CardTitle>
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Staff only. The owner&apos;s statement shows just the total, as Other charges.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-1 text-sm">
+                {otherCharges.map((c, i) => (
+                  <li key={i} className="flex justify-between gap-4">
+                    <span>{c.description}</span>
+                    <Money amount={c.amount} />
+                  </li>
+                ))}
+                <li className="flex justify-between gap-4 border-t border-[var(--border)] pt-1 font-medium">
+                  <span>Total</span>
+                  <Money amount={statement.other_charges_aed} />
+                </li>
+              </ul>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <StatementDocument

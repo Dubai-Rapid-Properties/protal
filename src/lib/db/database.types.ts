@@ -3150,6 +3150,8 @@ export type Database = {
           fee_vat_applied: boolean | null;
           other_fees_aed: number;
           other_fees_note: string | null;
+          other_charges_aed: number;
+          other_charges: Json;
           opening_balance_aed: number;
           closing_balance_aed: number;
           issued_on: string | null;
@@ -3179,6 +3181,8 @@ export type Database = {
           fee_vat_applied?: boolean | null;
           other_fees_aed?: number;
           other_fees_note?: string | null;
+          other_charges_aed?: number;
+          other_charges?: Json;
           opening_balance_aed?: number;
           closing_balance_aed?: number;
           issued_on?: string | null;
@@ -3208,6 +3212,8 @@ export type Database = {
           fee_vat_applied?: boolean | null;
           other_fees_aed?: number;
           other_fees_note?: string | null;
+          other_charges_aed?: number;
+          other_charges?: Json;
           opening_balance_aed?: number;
           closing_balance_aed?: number;
           issued_on?: string | null;
@@ -5474,6 +5480,7 @@ export type Database = {
           p_fee_pct?: number | null;
           p_fee_vat?: boolean;
           p_other_items?: Json;
+          p_other_charges?: Json;
         };
         Returns: unknown;
       };

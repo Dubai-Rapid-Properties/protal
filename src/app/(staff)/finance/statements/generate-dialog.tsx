@@ -30,6 +30,89 @@ function Submit() {
   );
 }
 
+/** A list of fees, item by item - what each is for and its amount - sent as JSON in `name`. */
+function FeeItems({
+  name,
+  label,
+  noun,
+  placeholder,
+  hint,
+}: {
+  name: string;
+  label: string;
+  noun: string;
+  placeholder: string;
+  hint: string;
+}) {
+  const [items, setItems] = React.useState<{ key: number; description: string; amount: string }[]>([]);
+  const nextKey = React.useRef(0);
+  const total = items.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+  const setItem = (key: number, field: "description" | "amount", value: string) =>
+    setItems((list) => list.map((i) => (i.key === key ? { ...i, [field]: value } : i)));
+
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <input
+        type="hidden"
+        name={name}
+        value={JSON.stringify(items.map(({ description, amount }) => ({ description, amount })))}
+      />
+      {items.map((item, n) => (
+        <div key={item.key} className="flex gap-2">
+          <Input
+            aria-label={`${noun} ${n + 1}: what it is for`}
+            placeholder={placeholder}
+            required
+            maxLength={200}
+            value={item.description}
+            onChange={(e) => setItem(item.key, "description", e.target.value)}
+          />
+          <Input
+            aria-label={`${noun} ${n + 1}: amount (AED)`}
+            placeholder="AED"
+            type="number"
+            inputMode="decimal"
+            min={0.01}
+            step="0.01"
+            required
+            className="w-32 shrink-0"
+            value={item.amount}
+            onChange={(e) => setItem(item.key, "amount", e.target.value)}
+          />
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="shrink-0"
+            aria-label={`Remove ${noun.toLowerCase()} ${n + 1}`}
+            onClick={() => setItems((list) => list.filter((i) => i.key !== item.key))}
+          >
+            <X className="size-4" />
+          </Button>
+        </div>
+      ))}
+      <div className="flex items-center justify-between gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setItems((list) => [...list, { key: nextKey.current++, description: "", amount: "" }])}
+        >
+          <Plus className="size-4" />
+          Add item
+        </Button>
+        {items.length > 0 && (
+          <span className="text-sm text-[var(--muted-foreground)]">
+            Total AED {total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-[var(--muted-foreground)]">{hint}</p>
+    </div>
+  );
+}
+
 export function GenerateStatementDialog({
   owners,
   vatRate,
@@ -40,13 +123,6 @@ export function GenerateStatementDialog({
 }) {
   const [open, setOpen] = React.useState(false);
   const [state, action] = useActionState<ActionState, FormData>(generateStatement, {});
-  // Utility fees, item by item: what each is for and its amount.
-  const [items, setItems] = React.useState<{ key: number; description: string; amount: string }[]>([]);
-  const nextKey = React.useRef(0);
-  const otherTotal = items.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
-  const addItem = () => setItems((list) => [...list, { key: nextKey.current++, description: "", amount: "" }]);
-  const setItem = (key: number, field: "description" | "amount", value: string) =>
-    setItems((list) => list.map((i) => (i.key === key ? { ...i, [field]: value } : i)));
 
   React.useEffect(() => {
     if (state.error) toast.error(state.error);
@@ -135,62 +211,23 @@ export function GenerateStatementDialog({
               </label>
             </div>
 
-            <div className="space-y-2">
-              <Label>Utility fees</Label>
-              <input
-                type="hidden"
-                name="otherItems"
-                value={JSON.stringify(items.map(({ description, amount }) => ({ description, amount })))}
-              />
-              {items.map((item, n) => (
-                <div key={item.key} className="flex gap-2">
-                  <Input
-                    aria-label={`Utility fee ${n + 1}: what it is for`}
-                    placeholder="e.g. DEWA, Etisalat, gas"
-                    required
-                    maxLength={200}
-                    value={item.description}
-                    onChange={(e) => setItem(item.key, "description", e.target.value)}
-                  />
-                  <Input
-                    aria-label={`Utility fee ${n + 1}: amount (AED)`}
-                    placeholder="AED"
-                    type="number"
-                    inputMode="decimal"
-                    min={0.01}
-                    step="0.01"
-                    required
-                    className="w-32 shrink-0"
-                    value={item.amount}
-                    onChange={(e) => setItem(item.key, "amount", e.target.value)}
-                  />
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="shrink-0"
-                    aria-label={`Remove utility fee ${n + 1}`}
-                    onClick={() => setItems((list) => list.filter((i) => i.key !== item.key))}
-                  >
-                    <X className="size-4" />
-                  </Button>
-                </div>
-              ))}
-              <div className="flex items-center justify-between gap-2">
-                <Button type="button" size="sm" variant="outline" onClick={addItem}>
-                  <Plus className="size-4" />
-                  Add item
-                </Button>
-                {items.length > 0 && (
-                  <span className="text-sm text-[var(--muted-foreground)]">
-                    Total AED {otherTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                )}
-              </div>
-            </div>
+            <FeeItems
+              name="otherItems"
+              label="Utility fees"
+              noun="Utility fee"
+              placeholder="e.g. DEWA, Etisalat, gas"
+              hint="Each one is listed on the owner's statement under its own name, with the expenses."
+            />
+            <FeeItems
+              name="otherCharges"
+              label="Other fees"
+              noun="Other fee"
+              placeholder="What for (staff only)"
+              hint="Not itemised for the owner: their statement shows only the total, as one line, Other charges."
+            />
 
             <p className="text-xs text-[var(--muted-foreground)]">
-              Net payout = income − expenses − management fee − VAT on the fee − utility fees.
+              Net payout = income − expenses − management fee − VAT on the fee − utility fees − other fees.
               Ledger lines already carried on another statement are skipped, so the same
               income can never be paid out twice.
             </p>

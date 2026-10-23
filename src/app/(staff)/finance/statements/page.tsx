@@ -47,6 +47,7 @@ export default async function StatementsPage() {
     "Management fee (AED)": s.management_fee_aed,
     "VAT (AED)": s.vat_total_aed,
     "Utility fees (AED)": s.other_fees_aed,
+    "Other fees (AED)": s.other_charges_aed,
     "Net payout (AED)": s.net_payout_aed,
     Status: s.status,
   }));
