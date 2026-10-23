@@ -15,8 +15,10 @@ import { buildStatementPdf } from "@/lib/statements/pdf";
 
 export type ActionState = { error?: string; success?: string };
 
-/** Fees item by item - what each is for and its amount - as the dialog sends them (JSON). */
-const feeItems = (what: string) =>
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** A list the dialog sends as JSON, checked against `item`. */
+const jsonList = <T extends z.ZodTypeAny>(what: string, item: T) =>
   z
     .string()
     .default("[]")
@@ -28,16 +30,26 @@ const feeItems = (what: string) =>
         return z.NEVER;
       }
     })
-    .pipe(
-      z
-        .array(
-          z.object({
-            description: z.string().trim().min(1, `Say what each ${what} is for`).max(200),
-            amount: z.coerce.number().positive(`Each ${what} needs an amount above 0`).max(10_000_000),
-          })
-        )
-        .max(50)
-    );
+    .pipe(z.array(item).max(200));
+
+/** Fees item by item - what each is for and its amount - as the dialog sends them (JSON). */
+const feeItems = (what: string) =>
+  jsonList(
+    what,
+    z.object({
+      description: z.string().trim().min(1, `Say what each ${what} is for`).max(200),
+      amount: z.coerce.number().positive(`Each ${what} needs an amount above 0`).max(10_000_000),
+    })
+  );
+
+/** An amount in AED or a %, one of the two (0061). */
+const amountOrPct = (what: string) =>
+  z
+    .object({
+      amount: z.number().min(0, `${what} cannot be negative`).max(10_000_000).optional(),
+      pct: z.number().min(0, `${what} cannot be negative`).max(100, `${what} cannot be over 100%`).optional(),
+    })
+    .refine((v) => (v.amount === undefined) !== (v.pct === undefined), `Give each ${what.toLowerCase()} an amount or a %`);
 
 const statementSchema = z.object({
   ownerId: z.string().uuid("Select an owner"),
@@ -52,7 +64,18 @@ const statementSchema = z.object({
   // Utility fees (0055): each listed for the owner under its own name.
   otherItems: feeItems("utility fee"),
   // Other fees (0056, 0057): kept for staff; never on the owner's statement, not deducted.
-  otherCharges: feeItems("other fee"),
+  // An amount, or a % of the statement's booking income (0061).
+  otherCharges: jsonList(
+    "other fee",
+    z
+      .object({ description: z.string().trim().min(1, "Say what each other fee is for").max(200) })
+      .and(amountOrPct("An other fee"))
+  ),
+  // Taken off a booking's rent before the statement shows it (0061).
+  bookingAdjustments: jsonList(
+    "booking deduction",
+    z.object({ ledgerEntryId: z.string().uuid() }).and(amountOrPct("A booking deduction"))
+  ),
 });
 
 /**
@@ -92,8 +115,15 @@ export async function generateStatement(
     p_period_end: input.periodEnd,
     p_fee_pct: input.feePct,
     p_fee_vat: input.feeVat === "on",
-    p_other_items: input.otherItems.map((i) => ({ description: i.description, amount: Math.round(i.amount * 100) / 100 })),
-    p_other_charges: input.otherCharges.map((i) => ({ description: i.description, amount: Math.round(i.amount * 100) / 100 })),
+    p_other_items: input.otherItems.map((i) => ({ description: i.description, amount: round2(i.amount) })),
+    p_other_charges: input.otherCharges.map((i) =>
+      i.pct !== undefined ? { description: i.description, pct: i.pct } : { description: i.description, amount: round2(i.amount ?? 0) }
+    ),
+    p_booking_adjustments: input.bookingAdjustments
+      .filter((a) => (a.pct ?? a.amount ?? 0) > 0)
+      .map((a) =>
+        a.pct !== undefined ? { ledger_entry_id: a.ledgerEntryId, pct: a.pct } : { ledger_entry_id: a.ledgerEntryId, amount: round2(a.amount ?? 0) }
+      ),
   });
 
   if (error) {
@@ -317,7 +347,9 @@ export async function approveAndSendStatement(statementId: string): Promise<Acti
     supabase.from("owner_statement_lines").select("*").eq("statement_id", statementId).order("sort_order"),
     supabase
       .from("company_settings")
-      .select("trade_name, legal_name, registered_address, trade_licence_number, rera_broker_number, trn, phone, email, vat_rate")
+      .select(
+        "trade_name, legal_name, statement_legal_name, registered_address, trade_licence_number, rera_broker_number, trn, phone, email, vat_rate"
+      )
       .maybeSingle(),
   ]);
   if (!statement) return { error: "Statement not found." };
@@ -328,14 +360,16 @@ export async function approveAndSendStatement(statementId: string): Promise<Acti
   if (!to) return { error: "The owner has no email address. Add it on the owner's page, then approve." };
 
   const ownerName = statement.owners?.full_name ?? "Owner";
+  // Owner statements are issued by the holiday-home company (0061).
+  const issuer = company && { ...company, legal_name: company.statement_legal_name || company.legal_name };
   const today = dubaiToday();
   const pdf = await buildStatementPdf({
     statement: { ...statement, issued_on: today },
     lines: lines ?? [],
     owner: { ...statement.owners, full_name: ownerName },
-    company,
+    company: issuer,
   });
-  const message = buildStatementEmail({ statement, ownerName, company, portalUrl: env.ownerUrl });
+  const message = buildStatementEmail({ statement, ownerName, company: issuer, portalUrl: env.ownerUrl });
   const result = await sendMessage({
     channel: "email",
     to,
@@ -366,4 +400,55 @@ export async function approveAndSendStatement(statementId: string): Promise<Acti
   revalidatePath(`/finance/statements/${statementId}`);
   revalidatePath("/finance/statements");
   return { success: `Approved and sent to ${to}.` };
+}
+
+
+export interface StatementBooking {
+  ledgerEntryId: string;
+  guest: string;
+  unit: string | null;
+  checkIn: string | null;
+  checkOut: string | null;
+  nights: number | null;
+  amount: number;
+}
+
+/**
+ * The income a statement for this owner and period would carry, for the
+ * generate dialog to list with a deduction box each (0061): the bookings'
+ * payouts not yet on a statement.
+ */
+export async function statementBookings(ownerId: string, periodStart: string, periodEnd: string): Promise<StatementBooking[]> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "statements.issue")) return [];
+  const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+  if (!z.string().uuid().safeParse(ownerId).success || !date.safeParse(periodStart).success || !date.safeParse(periodEnd).success) {
+    return [];
+  }
+
+  const supabase = await createClient();
+  await supabase.rpc("post_completed_bookings");
+  const { data } = await supabase
+    .from("ledger_entries")
+    .select(
+      "id, entry_date, description, amount_aed, stay_nights, units(unit_number, properties(name)), gl_categories!inner(affects_owner_statement), bookings(check_in, check_out, nights, guests(full_name))"
+    )
+    .eq("owner_id", ownerId)
+    .eq("direction", "income")
+    .eq("is_owner_visible", true)
+    .eq("gl_categories.affects_owner_statement", true)
+    .is("statement_id", null)
+    .gte("entry_date", periodStart)
+    .lte("entry_date", periodEnd)
+    .order("entry_date");
+
+  return (data ?? []).map((l) => ({
+    ledgerEntryId: l.id,
+    guest: l.bookings?.guests?.full_name || l.description,
+    unit: l.units ? `${l.units.properties?.name ?? ""} ${l.units.unit_number}`.trim() : null,
+    checkIn: l.bookings?.check_in ?? null,
+    checkOut: l.bookings?.check_out ?? l.entry_date,
+    nights: l.stay_nights ?? l.bookings?.nights ?? null,
+    amount: Number(l.amount_aed),
+  }));
 }

@@ -757,6 +757,7 @@ export type Database = {
           email_owners_about_bookings: boolean;
           email_office_about_bookings: boolean;
           statement_approver_id: string | null;
+          statement_legal_name: string;
         };
         Insert: {
           id?: boolean;
@@ -799,6 +800,7 @@ export type Database = {
           email_owners_about_bookings?: boolean;
           email_office_about_bookings?: boolean;
           statement_approver_id?: string | null;
+          statement_legal_name?: string;
         };
         Update: {
           id?: boolean;
@@ -841,6 +843,7 @@ export type Database = {
           email_owners_about_bookings?: boolean;
           email_office_about_bookings?: boolean;
           statement_approver_id?: string | null;
+          statement_legal_name?: string;
         };
         Relationships: [];
       };
@@ -3091,6 +3094,8 @@ export type Database = {
           nights: number | null;
           mgmt_fee_aed: number | null;
           mgmt_fee_vat_aed: number | null;
+          original_amount_aed: number | null;
+          deduction_aed: number | null;
         };
         Insert: {
           id?: string;
@@ -3113,6 +3118,8 @@ export type Database = {
           nights?: number | null;
           mgmt_fee_aed?: number | null;
           mgmt_fee_vat_aed?: number | null;
+          original_amount_aed?: number | null;
+          deduction_aed?: number | null;
         };
         Update: {
           id?: string;
@@ -3135,6 +3142,8 @@ export type Database = {
           nights?: number | null;
           mgmt_fee_aed?: number | null;
           mgmt_fee_vat_aed?: number | null;
+          original_amount_aed?: number | null;
+          deduction_aed?: number | null;
         };
         Relationships: [
           {
@@ -5532,6 +5541,7 @@ export type Database = {
           p_fee_vat?: boolean;
           p_other_items?: Json;
           p_other_charges?: Json;
+          p_booking_adjustments?: Json;
         };
         Returns: unknown;
       };

@@ -56,7 +56,10 @@ export default async function StatementDetailPage({
   const otherCharges = (Array.isArray(statement.other_charges) ? statement.other_charges : []) as {
     description: string;
     amount: number;
+    pct?: number;
   }[];
+  // Booking deductions (0061): the owner sees only the rent after them.
+  const deducted = (lines ?? []).filter((l) => l.deduction_aed != null);
 
   return (
     <>
@@ -112,13 +115,47 @@ export default async function StatementDetailPage({
               <ul className="space-y-1 text-sm">
                 {otherCharges.map((c, i) => (
                   <li key={i} className="flex justify-between gap-4">
-                    <span>{c.description}</span>
+                    <span>
+                      {c.description}
+                      {c.pct != null && (
+                        <span className="text-[var(--muted-foreground)]"> ({Number(c.pct)}% of booking income)</span>
+                      )}
+                    </span>
                     <Money amount={c.amount} />
                   </li>
                 ))}
                 <li className="flex justify-between gap-4 border-t border-[var(--border)] pt-1 font-medium">
                   <span>Total</span>
                   <Money amount={statement.other_charges_aed} />
+                </li>
+              </ul>
+            </CardContent>
+          </Card>
+        )}
+        {deducted.length > 0 && (
+          <Card className="mb-5">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Booking deductions</CardTitle>
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Staff only. Taken off these bookings&apos; rent; the owner&apos;s statement shows the rent after them.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-1 text-sm">
+                {deducted.map((l) => (
+                  <li key={l.id} className="flex flex-wrap justify-between gap-x-4">
+                    <span>{l.guest_name || l.description}</span>
+                    <span className="tabular-nums text-[var(--muted-foreground)]">
+                      <Money amount={l.original_amount_aed} /> − <Money amount={l.deduction_aed} /> ={" "}
+                      <span className="font-medium text-[var(--foreground)]">
+                        <Money amount={l.amount_aed} />
+                      </span>
+                    </span>
+                  </li>
+                ))}
+                <li className="flex justify-between gap-4 border-t border-[var(--border)] pt-1 font-medium">
+                  <span>Total deducted</span>
+                  <Money amount={deducted.reduce((sum, l) => sum + Number(l.deduction_aed), 0)} />
                 </li>
               </ul>
             </CardContent>

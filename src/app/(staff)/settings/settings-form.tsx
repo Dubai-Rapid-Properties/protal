@@ -196,24 +196,33 @@ export function SettingsForm({
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Owner statements</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-1.5">
-          <Label htmlFor="statementApproverId">Statement approver</Label>
-          <Select
-            id="statementApproverId"
-            name="statementApproverId"
-            defaultValue={settings.statement_approver_id ?? ""}
-          >
-            <option value="">Any super admin</option>
-            {approvers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.full_name || p.email}
-              </option>
-            ))}
-          </Select>
-          <p className="text-xs text-[var(--muted-foreground)]">
-            Statements the office sends for approval wait for this person, on Owner statements. Approving
-            emails the statement to the owner.
-          </p>
+        <CardContent className="space-y-4">
+          <FormField
+            name="statementLegalName"
+            label="Company name on owner statements"
+            defaultValue={settings.statement_legal_name}
+            hint="Printed on owner statements and the emails that send them. The legal name above stays on everything else."
+            required
+          />
+          <div className="space-y-1.5">
+            <Label htmlFor="statementApproverId">Statement approver</Label>
+            <Select
+              id="statementApproverId"
+              name="statementApproverId"
+              defaultValue={settings.statement_approver_id ?? ""}
+            >
+              <option value="">Any super admin</option>
+              {approvers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.full_name || p.email}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs text-[var(--muted-foreground)]">
+              Statements the office sends for approval wait for this person, on Owner statements. Approving
+              emails the statement to the owner.
+            </p>
+          </div>
         </CardContent>
       </Card>
 
