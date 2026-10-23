@@ -2945,6 +2945,7 @@ export type Database = {
           unit_id: string | null;
           created_at: string;
           read_at: string | null;
+          pushed_at: string | null;
           ticket_id: string | null;
         };
         Insert: {
@@ -2958,6 +2959,7 @@ export type Database = {
           unit_id?: string | null;
           created_at?: string;
           read_at?: string | null;
+          pushed_at?: string | null;
           ticket_id?: string | null;
         };
         Update: {
@@ -2971,6 +2973,7 @@ export type Database = {
           unit_id?: string | null;
           created_at?: string;
           read_at?: string | null;
+          pushed_at?: string | null;
           ticket_id?: string | null;
         };
         Relationships: [
@@ -5413,6 +5416,10 @@ export type Database = {
       };
       link_channel_stay: {
         Args: Record<string, unknown>;
+        Returns: unknown;
+      };
+      claim_notification_pushes: {
+        Args: Record<string, never>;
         Returns: unknown;
       };
       move_booking: {

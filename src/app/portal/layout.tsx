@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 import { HistoryNav } from "@/components/layout/history-nav";
+import { NotificationSetup } from "@/components/layout/notification-setup";
 import { OWNER_NAV } from "@/components/layout/nav";
 import { requirePortalProfile } from "@/lib/auth/session";
 import { unreadNotificationCount } from "@/lib/notify/count";
@@ -41,6 +42,7 @@ export default async function PortalLayout({
         showChangePassword={env.ownerPasswords}
       />
       <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
+        <NotificationSetup />
         <HistoryNav />
         {children}
       </main>

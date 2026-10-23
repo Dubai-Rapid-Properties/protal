@@ -82,10 +82,19 @@ function alarmMessage(r: Ring): PushMessage {
   };
 }
 
-async function deliver(admin: Client, keys: VapidKeys, target: PushTarget & { id: string }, message: PushMessage) {
-  // Short TTL: an alarm that arrives long after the fact helps nobody, and
-  // the next run sends it again anyway.
-  const result = await sendPush(target, message, keys, subject(), { ttlSeconds: 300 });
+/**
+ * Sends one message to one device; forgets a device the push service says is
+ * gone. The default TTL is short: an alarm that arrives long after the fact
+ * helps nobody, and the next run sends it again anyway.
+ */
+export async function deliver(
+  admin: Client,
+  keys: VapidKeys,
+  target: PushTarget & { id: string },
+  message: PushMessage,
+  ttlSeconds = 300
+) {
+  const result = await sendPush(target, message, keys, subject(), { ttlSeconds });
   if (result === "gone") await admin.from("push_subscriptions").delete().eq("id", target.id);
   else if (result === "sent") {
     await admin.from("push_subscriptions").update({ last_sent_at: new Date().toISOString() }).eq("id", target.id);
@@ -125,8 +134,8 @@ export async function pushStayAlarms(admin: Client) {
   };
 }
 
-/** "Phone alarm is on": proves the device can be reached, right after it signs up. */
-export async function pushConfirmation(admin: Client, endpoint: string) {
+/** "Notifications are on": proves the device can be reached, right after it signs up. */
+export async function pushConfirmation(admin: Client, endpoint: string, alarms = true) {
   const { data } = await admin
     .from("push_subscriptions")
     .select("id, endpoint, p256dh, auth")
@@ -134,8 +143,10 @@ export async function pushConfirmation(admin: Client, endpoint: string) {
     .maybeSingle();
   if (!data) return { error: "Device not saved" };
   const result = await deliver(admin, await getVapidKeys(admin), data, {
-    title: "Phone alarm is on",
-    body: "Check-outs ring at 11:00 and 12:00, check-ins at 14:00 and 15:00, until someone presses Done.",
+    title: "Notifications are on",
+    body: alarms
+      ? "Bookings and tickets arrive here as they happen, and the check-out / check-in alarm rings until someone presses Done."
+      : "New, changed and cancelled bookings arrive here as they happen.",
     tag: "phone-alarm-on",
     url: "/bookings",
   });

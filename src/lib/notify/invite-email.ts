@@ -44,14 +44,10 @@ const MUTED = "#6b7280";
 const escape = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+/** Name, legal name and contact. No street address: owners asked for it off. */
 function signature(company: InviteCompany | null | undefined): string[] {
   const contact = [company?.phone, company?.email].filter(Boolean).join(" · ");
-  return [
-    "D|R|P - Dubai Rapid Properties",
-    company?.legal_name ?? "",
-    contact,
-    company?.registered_address ?? "",
-  ].filter(Boolean);
+  return ["D|R|P - Dubai Rapid Properties", company?.legal_name ?? "", contact].filter(Boolean);
 }
 
 export function buildPortalInvite(input: InviteInput): InviteMessage {

@@ -1,7 +1,8 @@
 /*
- * D|R|P portal service worker: shows check-out / check-in alarms pushed by
- * /api/cron/stay-alarms while the portal is closed (src/lib/push). It does
- * not cache anything; pages always come from the network.
+ * D|R|P portal service worker: shows the portal's notifications and the
+ * check-out / check-in alarms pushed while the portal is closed
+ * (src/lib/push), as the phone's own notification banners. It does not cache
+ * anything; pages always come from the network.
  */
 
 self.addEventListener("install", () => self.skipWaiting());
@@ -14,6 +15,8 @@ self.addEventListener("push", (event) => {
   } catch {
     return;
   }
+  // A dot on the app icon until the portal is opened again.
+  if (!message.ack && self.navigator.setAppBadge) self.navigator.setAppBadge().catch(() => {});
   event.waitUntil(
     self.registration.showNotification(message.title, {
       body: message.body,

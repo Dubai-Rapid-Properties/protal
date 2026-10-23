@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/server";
 import { syncAllUnits } from "@/lib/ical/sync";
 import { syncBookingsSheet } from "@/lib/sheet/sync";
 import { sendQueuedEmails } from "@/lib/notify/email";
+import { pushNotifications } from "@/lib/push/notifications";
 import { env } from "@/lib/env";
 
 /**
@@ -43,6 +44,8 @@ async function handle(request: NextRequest) {
     // New imports queue booking emails; send them, plus anything a staff
     // action queued that was not sent at the time.
     const emails = await sendQueuedEmails(client);
+    // New and changed bookings to phones straight away (0051).
+    const pushed = await pushNotifications(client).catch(() => null);
     // Stays that ended since the last run post their income (migration 0023).
     const { data: posted } = await client.rpc("post_completed_bookings");
     const failed = results.filter((r) => !r.ok);
@@ -53,6 +56,7 @@ async function handle(request: NextRequest) {
       created: results.reduce((n, r) => n + (r.created ?? 0), 0),
       cancelled: results.reduce((n, r) => n + (r.cancelled ?? 0), 0),
       emails,
+      pushed,
       ledgerPosted: posted ?? 0,
       sheet: sheet && {
         ok: sheet.ok,

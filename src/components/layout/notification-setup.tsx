@@ -4,12 +4,12 @@ import * as React from "react";
 import { BellRing, Smartphone, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { getPushPublicKey, savePushSubscription } from "@/app/(staff)/alarm-actions";
+import { getPushPublicKey, savePushSubscription } from "@/app/push-actions";
 import { fromBase64Url } from "@/lib/push/webpush";
 
 type State = "checking" | "on" | "off" | "denied" | "ios-install" | "unsupported";
 
-const DISMISSED_KEY = "drp-phone-alarm-dismissed";
+const DISMISSED_KEY = "drp-notifications-dismissed";
 const DISMISS_FOR_MS = 7 * 24 * 3600_000;
 
 const isIos = () =>
@@ -27,18 +27,21 @@ function dismissedRecently() {
 }
 
 /**
- * Super admins and housekeeping (the layout renders it for them alone).
- * Offers to send the check-out / check-in alarm to this device as a
- * notification, so it arrives with the portal closed (0043). iPhones only
- * allow that for a portal added to the Home Screen, so there it explains how.
+ * Offers to turn on phone notifications for this device, so portal
+ * notifications - and for super admins and housekeeping the check-out /
+ * check-in alarm - arrive as the phone's own notification banners with the
+ * portal closed (0043, 0051). iPhones only allow that for a portal added to
+ * the Home Screen, so there it explains how. Staff and owners alike.
  */
-export function PhoneAlarmSetup() {
+export function NotificationSetup({ alarms = false }: { alarms?: boolean }) {
   const [state, setState] = React.useState<State>("checking");
   const [hidden, setHidden] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
     setHidden(dismissedRecently());
+    // Opening the portal clears the dot on the app icon (public/sw.js sets it).
+    (navigator as Navigator & { clearAppBadge?: () => Promise<void> }).clearAppBadge?.().catch(() => {});
     (async () => {
       if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
         return setState(isIos() && !installed() ? "ios-install" : "unsupported");
@@ -63,7 +66,6 @@ export function PhoneAlarmSetup() {
         return;
       }
       const key = await getPushPublicKey();
-      if (!key) return;
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
@@ -72,11 +74,11 @@ export function PhoneAlarmSetup() {
       const result = await savePushSubscription(subscription.toJSON(), navigator.userAgent, true);
       if (result.error) toast.error(result.error);
       else {
-        toast.success("Phone alarm is on.");
+        toast.success("Notifications are on for this device.");
         setState("on");
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not turn the phone alarm on.");
+      toast.error(error instanceof Error ? error.message : "Could not turn notifications on.");
     } finally {
       setBusy(false);
     }
@@ -92,6 +94,7 @@ export function PhoneAlarmSetup() {
   }
 
   if (hidden || state === "checking" || state === "on" || state === "unsupported") return null;
+  const what = alarms ? "bookings, tickets and the check-out / check-in alarm" : "new, changed and cancelled bookings";
 
   return (
     <div className="mb-4 flex flex-col gap-2 rounded-lg border bg-[var(--card)] p-3 text-sm shadow-sm sm:flex-row sm:items-center sm:justify-between print:hidden">
@@ -103,18 +106,18 @@ export function PhoneAlarmSetup() {
         )}
         <span>
           {state === "off" &&
-            "Get the check-out / check-in alarm on this device, even when the portal is closed."}
+            `Get ${what} on this device as notifications, like any app's, even when the portal is closed.`}
           {state === "denied" &&
-            "Notifications are blocked for the portal on this device. Allow them in the phone or browser settings to get the check-out / check-in alarm."}
+            `Notifications are blocked for the portal on this device. Allow them in the phone or browser settings to get ${what}.`}
           {state === "ios-install" &&
-            "To get the check-out / check-in alarm on this iPhone with the portal closed: tap Share, then Add to Home Screen. Open the portal from that icon and turn the alarm on there."}
+            `To get ${what} on this iPhone with the portal closed: tap Share, then Add to Home Screen. Open the portal from that icon and turn notifications on there.`}
         </span>
       </p>
       <div className="flex shrink-0 items-center gap-2">
         {state === "off" && (
           <Button type="button" size="sm" disabled={busy} onClick={turnOn}>
             <BellRing className="size-4" />
-            Turn on phone alarm
+            Turn on notifications
           </Button>
         )}
         <Button type="button" size="sm" variant="ghost" onClick={dismiss} aria-label="Not now">
