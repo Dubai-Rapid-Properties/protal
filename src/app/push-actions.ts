@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth/session";
-import { getVapidKeys, pushConfirmation } from "@/lib/push/stay-alarms";
+import { deliver, getVapidKeys, pushConfirmation } from "@/lib/push/stay-alarms";
 
 /** Who also gets the check-out / check-in alarm on the phone (0043, 0045). */
 const hearsAlarms = (p: { role: string; alarms_off?: boolean | null }) =>
@@ -44,4 +44,39 @@ export async function savePushSubscription(
   });
   if (error) return { error: error.message };
   return confirm ? pushConfirmation(createAdminClient(), parsed.data.endpoint, hearsAlarms(profile)) : {};
+}
+
+/**
+ * Sends a test notification to every device of whoever is signed in, and
+ * says how many the push service took. "Taken" means it reached Apple's or
+ * Google's servers; if it then does not show, the phone's own settings
+ * (Focus, the app's notifications) are holding it back.
+ */
+export async function sendTestNotification(): Promise<{ devices: number; sent: number; error?: string }> {
+  const profile = await requireProfile();
+  const admin = createAdminClient();
+  const { data: devices, error } = await admin
+    .from("push_subscriptions")
+    .select("id, endpoint, p256dh, auth")
+    .eq("profile_id", profile.id);
+  if (error) return { devices: 0, sent: 0, error: error.message };
+  if (!devices?.length) return { devices: 0, sent: 0 };
+
+  const keys = await getVapidKeys(admin);
+  const results = await Promise.all(
+    devices.map((d) =>
+      deliver(admin, keys, d, {
+        title: "Test notification",
+        body: "Notifications from the D|R|P portal reach this device.",
+        tag: `test-${Date.now()}`,
+        url: "/notifications",
+      })
+    )
+  );
+  const failed = results.find((r) => typeof r === "object");
+  return {
+    devices: devices.length,
+    sent: results.filter((r) => r === "sent").length,
+    error: failed && typeof failed === "object" ? failed.error : undefined,
+  };
 }
