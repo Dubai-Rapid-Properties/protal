@@ -62,6 +62,19 @@ export function monthBounds(date = new Date()): { start: string; end: string } {
 }
 
 /**
+ * The owner statement period finance runs on the 15th of each month: from the
+ * 16th of the month before to the latest 15th on or before `today`
+ * (YYYY-MM-DD). On 23 Oct that is 16 Sep - 15 Oct; on 10 Oct, 16 Aug - 15 Sep.
+ */
+export function statementPeriod(today: string): { start: string; end: string } {
+  const [y, m, d] = today.split("-").map(Number);
+  const endMonth = d >= 15 ? m - 1 : m - 2; // 0-based month of the closing 15th
+  const end = new Date(Date.UTC(y, endMonth, 15));
+  const start = new Date(Date.UTC(y, endMonth - 1, 16));
+  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+}
+
+/**
  * A rolling window ending today.
  *
  * Preferred over calendar-month bounds for operational dashboards: on the 1st

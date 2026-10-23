@@ -19,7 +19,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { generateStatement, type ActionState } from "../actions";
-import { monthBounds } from "@/lib/dates";
+import { statementPeriod } from "@/lib/dates";
+import { dubaiToday } from "@/lib/calendar";
 
 function Submit() {
   const { pending } = useFormStatus();
@@ -128,10 +129,8 @@ export function GenerateStatementDialog({
     if (state.error) toast.error(state.error);
   }, [state]);
 
-  // Default to the month just ended, which is what finance runs each month.
-  const lastMonth = new Date();
-  lastMonth.setMonth(lastMonth.getMonth() - 1);
-  const { start, end } = monthBounds(lastMonth);
+  // Default to the period finance runs on the 15th: 16th to 15th.
+  const { start, end } = statementPeriod(dubaiToday());
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
