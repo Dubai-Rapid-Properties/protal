@@ -125,7 +125,8 @@ export function StatementDocument({
             <tr>
               <td className="py-1">Less: expenses (incl. VAT)</td>
               <td className="py-1 text-right">
-                ({formatAED(statement.total_expenses_aed)})
+                {/* Other fees (0055) are expenses to the owner, each listed below under its own name */}
+                ({formatAED(Number(statement.total_expenses_aed) + Number(statement.other_fees_aed ?? 0))})
               </td>
             </tr>
             <tr>
@@ -144,14 +145,6 @@ export function StatementDocument({
               </td>
               <td className="py-1 text-right">({formatAED(statement.vat_total_aed)})</td>
             </tr>
-            {Number(statement.other_fees_aed) > 0 && (
-              <tr>
-                <td className="py-1">
-                  Less: other fees{statement.other_fees_note ? ` (${statement.other_fees_note})` : ""}
-                </td>
-                <td className="py-1 text-right">({formatAED(statement.other_fees_aed)})</td>
-              </tr>
-            )}
             <tr className="border-t-2 border-[#0F172A]">
               <td className="pt-2 text-base font-semibold">Net payable to owner</td>
               <td className="pt-2 text-right text-base font-semibold">

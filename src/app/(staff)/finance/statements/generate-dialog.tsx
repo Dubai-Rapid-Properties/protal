@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
-import { FilePlus2 } from "lucide-react";
+import { FilePlus2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +40,13 @@ export function GenerateStatementDialog({
 }) {
   const [open, setOpen] = React.useState(false);
   const [state, action] = useActionState<ActionState, FormData>(generateStatement, {});
+  // Other fees, item by item: what each is for and its amount.
+  const [items, setItems] = React.useState<{ key: number; description: string; amount: string }[]>([]);
+  const nextKey = React.useRef(0);
+  const otherTotal = items.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+  const addItem = () => setItems((list) => [...list, { key: nextKey.current++, description: "", amount: "" }]);
+  const setItem = (key: number, field: "description" | "amount", value: string) =>
+    setItems((list) => list.map((i) => (i.key === key ? { ...i, [field]: value } : i)));
 
   React.useEffect(() => {
     if (state.error) toast.error(state.error);
@@ -58,14 +65,14 @@ export function GenerateStatementDialog({
           Generate statement
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto">
         <form action={action}>
           <DialogHeader>
             <DialogTitle>Generate an owner statement</DialogTitle>
             <DialogDescription>
               Collected income and owner-borne expenses for the period are pulled from
               the ledger. The management fee is the % you set here, of that income;
-              other fees are taken off as entered.
+              other fees are taken off item by item, each under its own name.
             </DialogDescription>
           </DialogHeader>
 
@@ -128,22 +135,57 @@ export function GenerateStatementDialog({
               </label>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="otherFees">Other fees (AED)</Label>
-                <Input
-                  id="otherFees"
-                  name="otherFees"
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  step="0.01"
-                  placeholder="0.00"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="otherFeesNote">Other fees are for</Label>
-                <Input id="otherFeesNote" name="otherFeesNote" maxLength={200} placeholder="e.g. Key cutting, DEWA top-up" />
+            <div className="space-y-2">
+              <Label>Other fees</Label>
+              <input
+                type="hidden"
+                name="otherItems"
+                value={JSON.stringify(items.map(({ description, amount }) => ({ description, amount })))}
+              />
+              {items.map((item, n) => (
+                <div key={item.key} className="flex gap-2">
+                  <Input
+                    aria-label={`Other fee ${n + 1}: what it is for`}
+                    placeholder="What for, e.g. DEWA"
+                    required
+                    maxLength={200}
+                    value={item.description}
+                    onChange={(e) => setItem(item.key, "description", e.target.value)}
+                  />
+                  <Input
+                    aria-label={`Other fee ${n + 1}: amount (AED)`}
+                    placeholder="AED"
+                    type="number"
+                    inputMode="decimal"
+                    min={0.01}
+                    step="0.01"
+                    required
+                    className="w-32 shrink-0"
+                    value={item.amount}
+                    onChange={(e) => setItem(item.key, "amount", e.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="shrink-0"
+                    aria-label={`Remove other fee ${n + 1}`}
+                    onClick={() => setItems((list) => list.filter((i) => i.key !== item.key))}
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </div>
+              ))}
+              <div className="flex items-center justify-between gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={addItem}>
+                  <Plus className="size-4" />
+                  Add item
+                </Button>
+                {items.length > 0 && (
+                  <span className="text-sm text-[var(--muted-foreground)]">
+                    Total AED {otherTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                )}
               </div>
             </div>
 

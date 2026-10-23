@@ -27,7 +27,8 @@ begin
          ('2027-03-22', v_unit, v_owner, exp, 'expense', 'Plumber', 200.00, true);
 
   -- TEST 280 - the fee finance set, VAT on it, other fees: to the fils.
-  v_first := generate_owner_statement(v_owner, '2027-03-01', '2027-03-31', 15, true, 75.25, 'Key cutting');
+  v_first := generate_owner_statement(v_owner, '2027-03-01', '2027-03-31', 15, true,
+                                     '[{"description": "Key cutting", "amount": 75.25}]'::jsonb);
   select * into s from owner_statements where id = v_first;
   -- income 3500.55; expense 200 + VAT 10 = 210; fee round(525.0825) = 525.08;
   -- VAT on fee round(26.254) = 26.25; other 75.25; net 2663.97
@@ -38,13 +39,13 @@ begin
   end if;
   select count(*) into n from owner_statement_lines where statement_id = v_first
      and ((category_code = 'EXP-MGMT-FEE' and description = 'Management fee (15% of AED 3,500.55)' and total_aed = 551.33)
-          or (category_code = 'EXP-OTHER-FEES' and description = 'Other fees: Key cutting' and total_aed = 75.25));
+          or (category_code = 'EXP-OTHER-FEES' and description = 'Key cutting' and total_aed = 75.25));
   if n <> 2 then raise exception 'TEST 280 FAILED: fee lines %', n; end if;
   raise notice 'TEST 280 PASS  fee %%, VAT on it and other fees, to the fils';
 
   -- TEST 281 - void frees the lines and the period; the replacement, without VAT, finds them again.
   update owner_statements set status = 'void' where id = v_first;
-  v_second := generate_owner_statement(v_owner, '2027-03-01', '2027-03-31', 12.5, false, 0, null);
+  v_second := generate_owner_statement(v_owner, '2027-03-01', '2027-03-31', 12.5, false);
   select * into s from owner_statements where id = v_second;
   -- fee round(437.56875) = 437.57; no VAT; net 3500.55 - 210 - 437.57 = 2852.98
   if s.gross_income_aed <> 3500.55 or s.management_fee_aed <> 437.57 or s.vat_total_aed <> 0
@@ -66,6 +67,26 @@ begin
     if sqlerrm not like '%already exists%' then raise; end if;
   end;
   raise notice 'TEST 282 PASS  void stays void; one live statement per period';
+
+  -- TEST 284 - other fees item by item (the October sheet): 1,685.62 in five lines.
+  update owner_statements set status = 'void' where id = v_second;
+  v_second := generate_owner_statement(v_owner, '2027-03-01', '2027-03-31', 12.5, false,
+    '[{"description": "Dewa", "amount": 437.19}, {"description": "Etisalat", "amount": 479.94},
+      {"description": "Brother gas", "amount": 91}, {"description": "Zenner", "amount": 402.49},
+      {"description": "Fixing of water leakage in the ceiling", "amount": 275}]'::jsonb);
+  select * into s from owner_statements where id = v_second;
+  -- net 3500.55 - 210 - 437.57 - 0 - 1685.62 = 1167.36
+  select count(*) into n from owner_statement_lines where statement_id = v_second and category_code = 'EXP-OTHER-FEES';
+  if s.other_fees_aed <> 1685.62 or s.net_payout_aed <> 1167.36 or n <> 5
+     or not exists (select 1 from owner_statement_lines where statement_id = v_second and description = 'Dewa' and total_aed = 437.19) then
+    raise exception 'TEST 284 FAILED: % lines=%', row_to_json(s), n;
+  end if;
+  begin
+    perform generate_owner_statement(v_owner, '2027-04-01', '2027-04-30', 10, true, '[{"description": "", "amount": 5}]'::jsonb);
+    raise exception 'TEST 284 FAILED: an item without a description was accepted';
+  exception when check_violation then null;
+  end;
+  raise notice 'TEST 284 PASS  other fees item by item, each its own line, summed to the fils';
 
   -- TEST 283 - only dulshan@ deletes a statement; its income is freed again.
   begin

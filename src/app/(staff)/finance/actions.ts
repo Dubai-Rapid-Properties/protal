@@ -19,8 +19,28 @@ const statementSchema = z.object({
     .min(0, "The management fee cannot be negative")
     .max(100, "The management fee cannot be over 100%"),
   feeVat: z.literal("on").optional(),
-  otherFees: z.union([z.literal("").transform(() => 0), z.coerce.number().min(0, "Other fees cannot be negative").max(10_000_000)]).default(0),
-  otherFeesNote: z.string().trim().max(200).optional(),
+  // Other fees, item by item: what each is for and its amount (0055).
+  otherItems: z
+    .string()
+    .default("[]")
+    .transform((text, ctx) => {
+      try {
+        return JSON.parse(text) as unknown;
+      } catch {
+        ctx.addIssue({ code: "custom", message: "Check the other fees." });
+        return z.NEVER;
+      }
+    })
+    .pipe(
+      z
+        .array(
+          z.object({
+            description: z.string().trim().min(1, "Say what each other fee is for").max(200),
+            amount: z.coerce.number().positive("Each other fee needs an amount above 0").max(10_000_000),
+          })
+        )
+        .max(50)
+    ),
 });
 
 /**
@@ -60,8 +80,7 @@ export async function generateStatement(
     p_period_end: input.periodEnd,
     p_fee_pct: input.feePct,
     p_fee_vat: input.feeVat === "on",
-    p_other_fees: input.otherFees,
-    p_other_fees_note: input.otherFeesNote || null,
+    p_other_items: input.otherItems.map((i) => ({ description: i.description, amount: Math.round(i.amount * 100) / 100 })),
   });
 
   if (error) {
