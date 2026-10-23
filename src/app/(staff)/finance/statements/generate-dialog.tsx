@@ -147,8 +147,8 @@ export function GenerateStatementDialog({
             <DialogTitle>Generate an owner statement</DialogTitle>
             <DialogDescription>
               Collected income and owner-borne expenses for the period are pulled from
-              the ledger. The management fee is the % you set here, of that income;
-              utility fees are taken off item by item, each under its own name.
+              the ledger. The management fee is the % you set here, worked out on each
+              booking; utility fees are taken off item by item, each under its own name.
             </DialogDescription>
           </DialogHeader>
 
@@ -223,11 +223,11 @@ export function GenerateStatementDialog({
               label="Other fees"
               noun="Other fee"
               placeholder="What for (staff only)"
-              hint="Not itemised for the owner: their statement shows only the total, as one line, Other charges."
+              hint="For our own figures only: never on the owner's statement and not taken off their payout."
             />
 
             <p className="text-xs text-[var(--muted-foreground)]">
-              Net payout = income − expenses − management fee − VAT on the fee − utility fees − other fees.
+              Net payout = income − expenses − utility fees − management fee − VAT on the fee.
               Ledger lines already carried on another statement are skipped, so the same
               income can never be paid out twice.
             </p>

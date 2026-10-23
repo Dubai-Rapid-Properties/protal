@@ -45,7 +45,7 @@ const statementSchema = z.object({
   feeVat: z.literal("on").optional(),
   // Utility fees (0055): each listed for the owner under its own name.
   otherItems: feeItems("utility fee"),
-  // Other fees (0056): deducted, shown to the owner only as one sum.
+  // Other fees (0056, 0057): kept for staff; never on the owner's statement, not deducted.
   otherCharges: feeItems("other fee"),
 });
 

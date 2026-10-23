@@ -83,7 +83,7 @@ export default async function StatementDetailPage({
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Other fees</CardTitle>
               <p className="text-xs text-[var(--muted-foreground)]">
-                Staff only. The owner&apos;s statement shows just the total, as Other charges.
+                Staff only, for our own figures: never on the owner&apos;s statement.
               </p>
             </CardHeader>
             <CardContent>
