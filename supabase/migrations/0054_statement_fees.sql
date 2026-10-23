@@ -273,3 +273,45 @@ $$;
 
 revoke all on function generate_owner_statement(uuid, date, date, numeric, boolean, numeric, text) from public, anon;
 grant execute on function generate_owner_statement(uuid, date, date, numeric, boolean, numeric, text) to authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- Deleting a statement: one account only (dulshan@dubairapidproperties.com).
+-- Its lines go with it and its ledger lines are freed for a new statement
+-- (ledger_entries.statement_id is "on delete set null").
+-- ---------------------------------------------------------------------------
+create or replace function pms.can_delete_statements()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pms
+as $$
+  select exists (
+    select 1 from profiles
+     where id = auth.uid() and is_active
+       and lower(email) = 'dulshan@dubairapidproperties.com'
+  );
+$$;
+
+create or replace function delete_owner_statement(p_statement_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+begin
+  if not pms.can_delete_statements() then
+    raise exception 'Only dulshan@dubairapidproperties.com can delete a statement'
+      using errcode = 'insufficient_privilege';
+  end if;
+  update ledger_entries set statement_id = null where statement_id = p_statement_id;
+  delete from owner_statements where id = p_statement_id;
+  if not found then
+    raise exception 'Statement not found' using errcode = 'no_data_found';
+  end if;
+end;
+$$;
+
+revoke all on function delete_owner_statement(uuid) from public, anon;
+grant execute on function delete_owner_statement(uuid) to authenticated;

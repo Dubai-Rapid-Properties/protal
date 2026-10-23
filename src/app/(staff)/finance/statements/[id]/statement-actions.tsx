@@ -2,10 +2,10 @@
 
 import * as React from "react";
 import { useActionState } from "react";
-import { Printer } from "lucide-react";
+import { Printer, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { updateStatementStatus, type ActionState } from "../../actions";
+import { deleteStatement, updateStatementStatus, type ActionState } from "../../actions";
 import type { Enums } from "@/lib/db/database.types";
 
 /** The next step a statement can take, given where it is. */
@@ -21,11 +21,15 @@ export function StatementActions({
   statementId,
   status,
   canIssue,
+  canDelete = false,
 }: {
   statementId: string;
   status: Enums<"statement_status">;
   canIssue: boolean;
+  /** dulshan@dubairapidproperties.com only (0054). */
+  canDelete?: boolean;
 }) {
+  const [deleting, startDelete] = React.useTransition();
   const [state, action] = useActionState<ActionState, FormData>(
     updateStatementStatus,
     {}
@@ -61,6 +65,24 @@ export function StatementActions({
             Void
           </Button>
         </form>
+      )}
+
+      {canDelete && (
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={deleting}
+          onClick={() => {
+            if (!window.confirm("Delete this statement? It is removed completely, and its income can go on a new statement.")) return;
+            startDelete(async () => {
+              const result = await deleteStatement(statementId);
+              if (result?.error) toast.error(result.error);
+            });
+          }}
+        >
+          <Trash2 className="size-4" />
+          {deleting ? "Deleting…" : "Delete"}
+        </Button>
       )}
     </div>
   );

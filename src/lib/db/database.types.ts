@@ -5486,6 +5486,10 @@ export type Database = {
         Args: Record<string, unknown>;
         Returns: unknown;
       };
+      delete_owner_statement: {
+        Args: { p_statement_id: string };
+        Returns: undefined;
+      };
       add_ticket_photo: {
         Args: { p_ticket_id: string; p_path: string };
         Returns: undefined;

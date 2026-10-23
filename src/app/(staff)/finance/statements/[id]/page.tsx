@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/domain/shared";
 import { StatementStatusBadge } from "@/components/domain/status-badge";
 import { StatementDocument } from "@/components/domain/statement-document";
 import { StatementActions } from "./statement-actions";
+import { canDeleteStatements } from "../../actions";
 
 /** Shared by the page and its metadata, so the statement is fetched once. */
 const getStatement = cache(async (id: string) => {
@@ -65,6 +66,7 @@ export default async function StatementDetailPage({
               statementId={id}
               status={statement.status}
               canIssue={can(profile.role, "statements.issue")}
+              canDelete={await canDeleteStatements(profile.email)}
             />
           }
         />

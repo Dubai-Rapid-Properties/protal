@@ -184,3 +184,29 @@ export async function createLedgerEntry(
   revalidatePath("/finance");
   return { success: "Ledger entry posted." };
 }
+
+/** The one account allowed to delete owner statements (0054). */
+const STATEMENT_DELETER = "dulshan@dubairapidproperties.com";
+
+export const canDeleteStatements = async (email: string | null | undefined) =>
+  (email ?? "").trim().toLowerCase() === STATEMENT_DELETER;
+
+/**
+ * Deletes a statement outright, with its lines; the income it carried is
+ * free for a new statement. Only dulshan@dubairapidproperties.com - the
+ * database checks the same.
+ */
+export async function deleteStatement(statementId: string): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!(await canDeleteStatements(profile.email))) {
+    return { error: "Only dulshan@dubairapidproperties.com can delete a statement." };
+  }
+  if (!z.string().uuid().safeParse(statementId).success) return { error: "Statement not found." };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("delete_owner_statement", { p_statement_id: statementId });
+  if (error) return { error: error.message };
+
+  revalidatePath("/finance/statements");
+  redirect("/finance/statements");
+}
