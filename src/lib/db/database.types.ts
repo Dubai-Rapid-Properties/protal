@@ -756,6 +756,7 @@ export type Database = {
           show_guest_first_name_to_owners: boolean;
           email_owners_about_bookings: boolean;
           email_office_about_bookings: boolean;
+          statement_approver_id: string | null;
         };
         Insert: {
           id?: boolean;
@@ -797,6 +798,7 @@ export type Database = {
           show_guest_first_name_to_owners?: boolean;
           email_owners_about_bookings?: boolean;
           email_office_about_bookings?: boolean;
+          statement_approver_id?: string | null;
         };
         Update: {
           id?: boolean;
@@ -838,6 +840,7 @@ export type Database = {
           show_guest_first_name_to_owners?: boolean;
           email_owners_about_bookings?: boolean;
           email_office_about_bookings?: boolean;
+          statement_approver_id?: string | null;
         };
         Relationships: [];
       };
@@ -3191,6 +3194,11 @@ export type Database = {
           bookings_count: number;
           rented_nights: number;
           occupancy_pct: number | null;
+          submitted_at: string | null;
+          submitted_by: string | null;
+          sent_at: string | null;
+          sent_to: string | null;
+          return_note: string | null;
         };
         Insert: {
           id?: string;
@@ -3225,6 +3233,11 @@ export type Database = {
           bookings_count?: number;
           rented_nights?: number;
           occupancy_pct?: number | null;
+          submitted_at?: string | null;
+          submitted_by?: string | null;
+          sent_at?: string | null;
+          sent_to?: string | null;
+          return_note?: string | null;
         };
         Update: {
           id?: string;
@@ -3259,6 +3272,11 @@ export type Database = {
           bookings_count?: number;
           rented_nights?: number;
           occupancy_pct?: number | null;
+          submitted_at?: string | null;
+          submitted_by?: string | null;
+          sent_at?: string | null;
+          sent_to?: string | null;
+          return_note?: string | null;
         };
         Relationships: [
           {
@@ -5552,6 +5570,10 @@ export type Database = {
       portal_settings: {
         Args: Record<string, unknown>;
         Returns: unknown;
+      };
+      can_approve_statements: {
+        Args: Record<string, unknown>;
+        Returns: boolean;
       };
       post_completed_bookings: {
         Args: Record<string, unknown>;

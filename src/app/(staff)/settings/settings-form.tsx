@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { updateCompanySettings, type ActionState } from "./actions";
 import type { Tables } from "@/lib/db/database.types";
@@ -35,7 +36,14 @@ function FormField({
   );
 }
 
-export function SettingsForm({ settings }: { settings: Tables<"company_settings"> }) {
+export function SettingsForm({
+  settings,
+  approvers,
+}: {
+  settings: Tables<"company_settings">;
+  /** Super admins and finance: who may approve owner statements (0060). */
+  approvers: { id: string; full_name: string; email: string | null }[];
+}) {
   const [state, action] = useActionState<ActionState, FormData>(
     updateCompanySettings,
     {}
@@ -181,6 +189,31 @@ export function SettingsForm({ settings }: { settings: Tables<"company_settings"
             defaultValue={settings.permit_renewal_reminder_days}
             required
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Owner statements</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-1.5">
+          <Label htmlFor="statementApproverId">Statement approver</Label>
+          <Select
+            id="statementApproverId"
+            name="statementApproverId"
+            defaultValue={settings.statement_approver_id ?? ""}
+          >
+            <option value="">Any super admin</option>
+            {approvers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.full_name || p.email}
+              </option>
+            ))}
+          </Select>
+          <p className="text-xs text-[var(--muted-foreground)]">
+            Statements the office sends for approval wait for this person, on Owner statements. Approving
+            emails the statement to the owner.
+          </p>
         </CardContent>
       </Card>
 

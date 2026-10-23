@@ -7,6 +7,8 @@ import { PageHeader, EmptyState, Money } from "@/components/domain/shared";
 import { StatementStatusBadge } from "@/components/domain/status-badge";
 import { ExportButton } from "@/components/domain/export-button";
 import { GenerateStatementDialog } from "./generate-dialog";
+import { canApproveStatements } from "../actions";
+import type { Tables } from "@/lib/db/database.types";
 import { Card } from "@/components/ui/card";
 import {
   Table,
@@ -36,6 +38,9 @@ export default async function StatementsPage() {
   const statements = statementsResult.data ?? [];
   // Only used by the generate dialog, which only issuers see.
   const owners = can(profile.role, "statements.issue") ? (ownersResult.data ?? []) : [];
+  // Drafts sent for approval (0060); the approver sees them first.
+  const waiting = statements.filter((s) => s.status === "draft" && s.submitted_at);
+  const canApprove = await canApproveStatements();
 
   const exportRows = statements.map((s) => ({
     Statement: s.statement_number,
@@ -83,66 +88,87 @@ export default async function StatementsPage() {
           }
         />
       ) : (
-        <Card>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Statement</TableHead>
-                <TableHead>Owner</TableHead>
-                <TableHead>Period</TableHead>
-                <TableHead className="hidden lg:table-cell text-right">Income</TableHead>
-                <TableHead className="hidden lg:table-cell text-right">Fee + VAT</TableHead>
-                <TableHead className="text-right">Net payout</TableHead>
-                <TableHead className="text-right">Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {statements.map((statement) => (
-                <TableRow key={statement.id}>
-                  <TableCell>
-                    <Link
-                      href={`/finance/statements/${statement.id}`}
-                      className="font-medium hover:underline"
-                    >
-                      {statement.statement_number}
-                    </Link>
-                    <p className="text-xs text-[var(--muted-foreground)]">
-                      {statement.issued_on
-                        ? `Issued ${formatDate(statement.issued_on)}`
-                        : "Draft"}
-                    </p>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {statement.owners?.full_name ?? "—"}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap text-sm">
-                    {formatPeriod(statement.period_start, statement.period_end)}
-                  </TableCell>
-                  <TableCell className="hidden lg:table-cell text-right">
-                    <Money amount={statement.gross_income_aed} compact />
-                  </TableCell>
-                  <TableCell className="hidden lg:table-cell text-right">
-                    <Money
-                      amount={
-                        Number(statement.management_fee_aed) +
-                        Number(statement.vat_total_aed)
-                      }
-                      compact
-                      muted
-                    />
-                  </TableCell>
-                  <TableCell className="text-right font-medium">
-                    <Money amount={statement.net_payout_aed} />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <StatementStatusBadge status={statement.status} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
+        <>
+          {waiting.length > 0 && canApprove && (
+            <section className="mb-6">
+              <h2 className="mb-2 text-sm font-semibold">Waiting for your approval ({waiting.length})</h2>
+              <p className="mb-3 text-xs text-[var(--muted-foreground)]">
+                Open each one, check it, then approve it to email it to the owner, or send it back.
+              </p>
+              <StatementsTable statements={waiting} />
+            </section>
+          )}
+          {(canApprove ? statements.length > waiting.length : true) && (
+            <StatementsTable statements={canApprove ? statements.filter((s) => !waiting.includes(s)) : statements} />
+          )}
+        </>
       )}
     </>
+  );
+}
+
+type StatementRow = Tables<"owner_statements"> & { owners: { id: string; full_name: string } | null };
+
+function StatementsTable({ statements }: { statements: StatementRow[] }) {
+  return (
+    <Card>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Statement</TableHead>
+            <TableHead>Owner</TableHead>
+            <TableHead>Period</TableHead>
+            <TableHead className="hidden lg:table-cell text-right">Income</TableHead>
+            <TableHead className="hidden lg:table-cell text-right">Fee + VAT</TableHead>
+            <TableHead className="text-right">Net payout</TableHead>
+            <TableHead className="text-right">Status</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {statements.map((statement) => (
+            <TableRow key={statement.id}>
+              <TableCell>
+                <Link
+                  href={`/finance/statements/${statement.id}`}
+                  className="font-medium hover:underline"
+                >
+                  {statement.statement_number}
+                </Link>
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  {statement.issued_on
+                    ? `Issued ${formatDate(statement.issued_on)}`
+                    : "Draft"}
+                </p>
+              </TableCell>
+              <TableCell className="text-sm">
+                {statement.owners?.full_name ?? "—"}
+              </TableCell>
+              <TableCell className="whitespace-nowrap text-sm">
+                {formatPeriod(statement.period_start, statement.period_end)}
+              </TableCell>
+              <TableCell className="hidden lg:table-cell text-right">
+                <Money amount={statement.gross_income_aed} compact />
+              </TableCell>
+              <TableCell className="hidden lg:table-cell text-right">
+                <Money
+                  amount={
+                    Number(statement.management_fee_aed) +
+                    Number(statement.vat_total_aed)
+                  }
+                  compact
+                  muted
+                />
+              </TableCell>
+              <TableCell className="text-right font-medium">
+                <Money amount={statement.net_payout_aed} />
+              </TableCell>
+              <TableCell className="text-right">
+                <StatementStatusBadge status={statement.status} submitted={!!statement.submitted_at} />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Card>
   );
 }

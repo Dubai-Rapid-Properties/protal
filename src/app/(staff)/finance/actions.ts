@@ -6,6 +6,11 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
+import { env } from "@/lib/env";
+import { sendMessage } from "@/lib/messaging";
+import { dubaiToday } from "@/lib/calendar";
+import { flushEmailsSoon } from "@/lib/notify/flush";
+import { buildStatementEmail } from "@/lib/statements/email";
 
 export type ActionState = { error?: string; success?: string };
 
@@ -106,7 +111,8 @@ export async function generateStatement(
 
 const statusSchema = z.object({
   statementId: z.string().uuid(),
-  status: z.enum(["draft", "issued", "approved", "paid", "void"]),
+  // A draft reaches the owner only through the approver (approveAndSendStatement).
+  status: z.enum(["paid", "void"]),
 });
 
 export async function updateStatementStatus(
@@ -129,9 +135,6 @@ export async function updateStatementStatus(
     .from("owner_statements")
     .update({
       status,
-      issued_on: status === "issued" ? today : undefined,
-      approved_by: status === "approved" ? profile.id : undefined,
-      approved_at: status === "approved" ? new Date().toISOString() : undefined,
       paid_on: status === "paid" ? today : undefined,
     })
     .eq("id", statementId)
@@ -235,4 +238,118 @@ export async function deleteStatement(statementId: string): Promise<ActionState>
 
   revalidatePath("/finance/statements");
   redirect("/finance/statements");
+}
+
+
+const statementIdSchema = z.string().uuid();
+
+/** Whether this login approves statements (0060): the approver set in Company settings, else any super admin. */
+export async function canApproveStatements(): Promise<boolean> {
+  const supabase = await createClient();
+  const { data } = await supabase.rpc("can_approve_statements");
+  return data === true;
+}
+
+/** The office sends a draft to the approver, who sees it on Owner statements (and is notified). */
+export async function submitStatement(statementId: string): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "statements.issue")) return { error: "Only finance and administrators can send a statement for approval." };
+  if (!statementIdSchema.safeParse(statementId).success) return { error: "Statement not found." };
+
+  const supabase = await createClient();
+  const { data: changed, error } = await supabase
+    .from("owner_statements")
+    .update({ submitted_at: new Date().toISOString(), submitted_by: profile.id, return_note: null })
+    .eq("id", statementId)
+    .eq("status", "draft")
+    .is("submitted_at", null)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!changed?.length) return { error: "Only a draft that is not already waiting can be sent for approval." };
+
+  flushEmailsSoon();
+  revalidatePath(`/finance/statements/${statementId}`);
+  revalidatePath("/finance/statements");
+  return { success: "Sent for approval." };
+}
+
+/** The approver sends a draft back to the office, with what to change. */
+export async function returnStatement(statementId: string, note: string): Promise<ActionState> {
+  await requireProfile();
+  if (!(await canApproveStatements())) return { error: "Only the statement approver can send a statement back." };
+  if (!statementIdSchema.safeParse(statementId).success) return { error: "Statement not found." };
+
+  const supabase = await createClient();
+  const { data: changed, error } = await supabase
+    .from("owner_statements")
+    .update({ submitted_at: null, return_note: note.trim().slice(0, 500) || null })
+    .eq("id", statementId)
+    .eq("status", "draft")
+    .not("submitted_at", "is", null)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!changed?.length) return { error: "This statement is not waiting for approval." };
+
+  flushEmailsSoon();
+  revalidatePath(`/finance/statements/${statementId}`);
+  revalidatePath("/finance/statements");
+  return { success: "Sent back to the office." };
+}
+
+/**
+ * The approver approves a statement waiting for approval and emails it to
+ * the owner: the summary and the booking breakdown, in the email itself.
+ * Nothing changes unless the email went out.
+ */
+export async function approveAndSendStatement(statementId: string): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!(await canApproveStatements())) return { error: "Only the statement approver can approve a statement." };
+  if (!statementIdSchema.safeParse(statementId).success) return { error: "Statement not found." };
+
+  const supabase = await createClient();
+  const [{ data: statement }, { data: lines }, { data: company }] = await Promise.all([
+    supabase.from("owner_statements").select("*, owners(full_name, email)").eq("id", statementId).maybeSingle(),
+    supabase.from("owner_statement_lines").select("*").eq("statement_id", statementId).order("sort_order"),
+    supabase
+      .from("company_settings")
+      .select("trade_name, legal_name, registered_address, phone, email, vat_rate")
+      .maybeSingle(),
+  ]);
+  if (!statement) return { error: "Statement not found." };
+  if (statement.status !== "draft" || !statement.submitted_at) {
+    return { error: "Only a statement waiting for approval can be approved." };
+  }
+  const to = statement.owners?.email?.trim();
+  if (!to) return { error: "The owner has no email address. Add it on the owner's page, then approve." };
+
+  const message = buildStatementEmail({
+    statement,
+    lines: lines ?? [],
+    ownerName: statement.owners?.full_name ?? "Owner",
+    company,
+    portalUrl: env.ownerUrl,
+  });
+  const result = await sendMessage({ channel: "email", to, subject: message.subject, body: message.text, html: message.html });
+  if (!result.ok || result.skipped) {
+    return { error: `The statement was not sent: ${result.error ?? "email is not set up"}` };
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("owner_statements")
+    .update({
+      status: "issued",
+      issued_on: dubaiToday(),
+      approved_by: profile.id,
+      approved_at: now,
+      sent_at: now,
+      sent_to: to,
+    })
+    .eq("id", statementId);
+  if (error) return { error: `The email went to ${to}, but the statement was not marked sent: ${error.message}` };
+
+  flushEmailsSoon();
+  revalidatePath(`/finance/statements/${statementId}`);
+  revalidatePath("/finance/statements");
+  return { success: `Approved and sent to ${to}.` };
 }
