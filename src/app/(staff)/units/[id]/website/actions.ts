@@ -37,6 +37,13 @@ const schema = z.object({
   checkOut: z.string().regex(/^\d{2}:\d{2}$/, "Check-out time like 11:00"),
   seasons: z.string().max(5000),
   beds: z.string().max(3000),
+  // The unit's own prices and guests, shown on the website.
+  nightlyRate: z.coerce.number({ message: "Enter the nightly rate" }).positive("Enter the nightly rate").max(1_000_000),
+  weekendRate: numOrNull.pipe(z.number().min(0).max(1_000_000).nullable()),
+  cleaningFee: numOrNull.pipe(z.number().min(0).max(1_000_000).nullable()),
+  weeklyDiscount: numOrNull.pipe(z.number().min(0, "Discounts are 0 to 99%").max(99, "Discounts are 0 to 99%").nullable()),
+  monthlyDiscount: numOrNull.pipe(z.number().min(0, "Discounts are 0 to 99%").max(99, "Discounts are 0 to 99%").nullable()),
+  maxGuests: z.coerce.number({ message: "Enter max guests" }).int().min(1, "Enter max guests").max(30),
 });
 
 export async function saveUnitWebsite(unitId: string, _prev: WebsiteState, formData: FormData): Promise<WebsiteState> {
@@ -69,6 +76,12 @@ export async function saveUnitWebsite(unitId: string, _prev: WebsiteState, formD
     checkOut: formData.get("checkOut") ?? "",
     seasons: formData.get("seasons") ?? "",
     beds: formData.get("beds") ?? "",
+    nightlyRate: formData.get("nightlyRate") ?? "",
+    weekendRate: formData.get("weekendRate") ?? "",
+    cleaningFee: formData.get("cleaningFee") ?? "",
+    weeklyDiscount: formData.get("weeklyDiscount") ?? "",
+    monthlyDiscount: formData.get("monthlyDiscount") ?? "",
+    maxGuests: formData.get("maxGuests") ?? "",
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form." };
   const v = parsed.data;
@@ -104,6 +117,12 @@ export async function saveUnitWebsite(unitId: string, _prev: WebsiteState, formD
       website_check_out: v.checkOut,
       website_seasons: seasons.seasons,
       ...(withBeds ? { website_beds: beds.beds } : {}),
+      base_nightly_rate_aed: v.nightlyRate,
+      weekend_rate_aed: v.weekendRate,
+      cleaning_fee_aed: v.cleaningFee ?? 0,
+      weekly_discount_pct: v.weeklyDiscount ?? 0,
+      monthly_discount_pct: v.monthlyDiscount ?? 0,
+      max_guests: v.maxGuests,
     })
     .eq("id", unitId);
   if (error) {
@@ -116,5 +135,6 @@ export async function saveUnitWebsite(unitId: string, _prev: WebsiteState, formD
     return { error: error.message };
   }
   revalidatePath(`/units/${unitId}`);
+  revalidatePath(`/units/${unitId}/website`);
   return { success: v.published ? "Saved. The website shows this home within a minute." : "Saved (not on the website)." };
 }

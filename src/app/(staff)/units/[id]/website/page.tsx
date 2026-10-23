@@ -32,11 +32,6 @@ export default async function UnitWebsitePage({ params }: { params: Promise<{ id
           </Button>
         }
       />
-      {!(Number(u.base_nightly_rate_aed) > 0) && (
-        <p className="rounded-md border border-[var(--border)] p-3 text-sm">
-          Set a nightly rate and max guests in the unit&apos;s <Link className="underline" href={`/units/${u.id}/edit`}>details</Link> before publishing.
-        </p>
-      )}
       <WebsiteForm unitId={u.id} d={websiteDefaults(u)} />
     </div>
   );
