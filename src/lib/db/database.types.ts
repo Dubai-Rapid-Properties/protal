@@ -4480,6 +4480,51 @@ export type Database = {
           },
         ];
       };
+      refunds: {
+        Row: {
+          id: string;
+          spent_by: string;
+          description: string;
+          amount_aed: number;
+          spent_on: string;
+          receipt_path: string | null;
+          status: string;
+          settled_on: string | null;
+          settled_by: string | null;
+          settle_note: string | null;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          spent_by: string;
+          description: string;
+          amount_aed: number;
+          spent_on?: string;
+          receipt_path?: string | null;
+          status?: string;
+          settled_on?: string | null;
+          settled_by?: string | null;
+          settle_note?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          spent_by?: string;
+          description?: string;
+          amount_aed?: number;
+          spent_on?: string;
+          receipt_path?: string | null;
+          status?: string;
+          settled_on?: string | null;
+          settled_by?: string | null;
+          settle_note?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       units: {
         Row: {
           id: string;

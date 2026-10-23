@@ -65,6 +65,10 @@ export type Capability =
   // CRM & comms
   | "leads.manage"
   | "messages.send"
+  // Refunds: office costs staff paid themselves (0052). Every staff member
+  // sees and adds claims; super admins settle them.
+  | "refunds.view"
+  | "refunds.settle"
   // Admin
   | "settings.manage"
   | "users.manage"
@@ -82,6 +86,7 @@ const ALL: Capability[] = [
   "documents.view", "documents.upload", "compliance.view",
   "website.manage",
   "leads.manage", "messages.send",
+  "refunds.view", "refunds.settle",
   "settings.manage", "users.manage", "audit.view",
 ];
 
@@ -100,6 +105,7 @@ export const CAPABILITIES: Record<Role, Capability[]> = {
     "documents.view", "documents.upload", "compliance.view",
     "website.manage",
     "leads.manage", "messages.send",
+    "refunds.view",
   ],
 
   agent: [
@@ -112,6 +118,7 @@ export const CAPABILITIES: Record<Role, Capability[]> = {
     "documents.view", "documents.upload",
     "website.manage",
     "leads.manage", "messages.send",
+    "refunds.view",
   ],
 
   // Owners get a read-only portal - properties, calendars, stays - plus
@@ -145,6 +152,7 @@ export const CAPABILITIES: Record<Role, Capability[]> = {
     "maintenance.view", "maintenance.raise", "maintenance.assign",
     "incidents.view", "incidents.report",
     "documents.view", "documents.upload",
+    "refunds.view",
   ],
 
   // Full financial access, no property CRUD.
@@ -158,6 +166,7 @@ export const CAPABILITIES: Record<Role, Capability[]> = {
     "incidents.view",
     "documents.view", "documents.upload", "compliance.view",
     "audit.view",
+    "refunds.view",
   ],
 
   // Listing content and media only - never financials.
@@ -167,6 +176,7 @@ export const CAPABILITIES: Record<Role, Capability[]> = {
     "documents.view", "documents.upload",
     "website.manage",
     "leads.manage", "messages.send",
+    "refunds.view",
   ],
 };
 
