@@ -37,10 +37,14 @@ begin
      or s.management_fee_pct <> 15 then
     raise exception 'TEST 280 FAILED: %', row_to_json(s);
   end if;
+  -- The fee booking by booking (0057): 150.00 + 7.50 VAT, 375.08 + 18.75 VAT.
   select count(*) into n from owner_statement_lines where statement_id = v_first
-     and ((category_code = 'EXP-MGMT-FEE' and description = 'Management fee (15% of AED 3,500.55)' and total_aed = 551.33)
+     and ((description = 'Stay A' and mgmt_fee_aed = 150.00 and mgmt_fee_vat_aed = 7.50)
+          or (description = 'Stay B' and mgmt_fee_aed = 375.08 and mgmt_fee_vat_aed = 18.75)
           or (category_code = 'EXP-OTHER-FEES' and description = 'Key cutting' and total_aed = 75.25));
-  if n <> 2 then raise exception 'TEST 280 FAILED: fee lines %', n; end if;
+  if n <> 3 or exists (select 1 from owner_statement_lines where statement_id = v_first and category_code = 'EXP-MGMT-FEE') then
+    raise exception 'TEST 280 FAILED: fee lines %', n;
+  end if;
   raise notice 'TEST 280 PASS  fee %%, VAT on it and utility fees, to the fils';
 
   -- TEST 281 - void frees the lines and the period; the replacement, without VAT, finds them again.
@@ -88,20 +92,20 @@ begin
   end;
   raise notice 'TEST 284 PASS  utility fees item by item, each its own line, summed to the fils';
 
-  -- TEST 285 - other fees come off the payout as one sum, with no lines for the owner.
+  -- TEST 285 - other fees are for us only: kept for staff, no lines, not off the payout (0057).
   update owner_statements set status = 'void' where id = v_second;
   v_second := generate_owner_statement(v_owner, '2027-03-01', '2027-03-31', 12.5, false,
     '[{"description": "Dewa", "amount": 437.19}]'::jsonb,
     '[{"description": "Admin charge", "amount": 100}, {"description": "Courier", "amount": 25.5}]'::jsonb);
   select * into s from owner_statements where id = v_second;
-  -- net 3500.55 - 210 - 437.57 - 0 - 437.19 - 125.50 = 2290.29
-  if s.other_charges_aed <> 125.50 or s.net_payout_aed <> 2290.29
+  -- net 3500.55 - 210 - 437.57 - 0 - 437.19 = 2415.79; the 125.50 is not deducted
+  if s.other_charges_aed <> 125.50 or s.net_payout_aed <> 2415.79
      or jsonb_array_length(s.other_charges) <> 2
      or exists (select 1 from owner_statement_lines where statement_id = v_second
                   and description in ('Admin charge', 'Courier')) then
     raise exception 'TEST 285 FAILED: %', row_to_json(s);
   end if;
-  raise notice 'TEST 285 PASS  other fees deducted as one sum, never itemised for the owner';
+  raise notice 'TEST 285 PASS  other fees kept for staff, not deducted, never itemised for the owner';
 
   -- TEST 283 - only dulshan@ deletes a statement; its income is freed again.
   begin

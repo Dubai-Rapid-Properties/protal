@@ -3078,6 +3078,13 @@ export type Database = {
           vat_amount_aed: number;
           total_aed: number;
           sort_order: number;
+          booking_id: string | null;
+          guest_name: string | null;
+          check_in: string | null;
+          check_out: string | null;
+          nights: number | null;
+          mgmt_fee_aed: number | null;
+          mgmt_fee_vat_aed: number | null;
         };
         Insert: {
           id?: string;
@@ -3093,6 +3100,13 @@ export type Database = {
           vat_amount_aed?: number;
           total_aed: number;
           sort_order?: number;
+          booking_id?: string | null;
+          guest_name?: string | null;
+          check_in?: string | null;
+          check_out?: string | null;
+          nights?: number | null;
+          mgmt_fee_aed?: number | null;
+          mgmt_fee_vat_aed?: number | null;
         };
         Update: {
           id?: string;
@@ -3108,6 +3122,13 @@ export type Database = {
           vat_amount_aed?: number;
           total_aed?: number;
           sort_order?: number;
+          booking_id?: string | null;
+          guest_name?: string | null;
+          check_in?: string | null;
+          check_out?: string | null;
+          nights?: number | null;
+          mgmt_fee_aed?: number | null;
+          mgmt_fee_vat_aed?: number | null;
         };
         Relationships: [
           {
@@ -3164,6 +3185,9 @@ export type Database = {
           created_by: string | null;
           created_at: string;
           updated_at: string;
+          bookings_count: number;
+          rented_nights: number;
+          occupancy_pct: number | null;
         };
         Insert: {
           id?: string;
@@ -3195,6 +3219,9 @@ export type Database = {
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
+          bookings_count?: number;
+          rented_nights?: number;
+          occupancy_pct?: number | null;
         };
         Update: {
           id?: string;
@@ -3226,6 +3253,9 @@ export type Database = {
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
+          bookings_count?: number;
+          rented_nights?: number;
+          occupancy_pct?: number | null;
         };
         Relationships: [
           {
