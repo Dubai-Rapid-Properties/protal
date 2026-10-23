@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/dates";
 import { validityLabel } from "@/lib/auth/link-validity";
 import {
+  emailInviteTest,
   emailPortalInvite,
   grantPortalAccess,
   revokePortalAccess,
@@ -62,6 +63,38 @@ function SendInviteEmail({ ownerId, email, link }: { ownerId: string; email: str
   );
 }
 
+/** Sends this owner's invite to a staff address, to see how it looks. */
+function SendTestEmail({ ownerId, defaultTo }: { ownerId: string; defaultTo: string }) {
+  const [state, action] = useActionState<InviteEmailState, FormData>(emailInviteTest, {});
+  React.useEffect(() => {
+    if (state.error) toast.error(state.error);
+    if (state.sentTo) toast.success(`Test email sent to ${state.sentTo}`);
+  }, [state]);
+  return (
+    <form action={action} className="space-y-2 border-t border-[var(--border)] pt-4">
+      <input type="hidden" name="ownerId" value={ownerId} />
+      <Label htmlFor="test-email">See the invitation email</Label>
+      <div className="flex gap-2">
+        <Input id="test-email" name="to" type="email" required defaultValue={defaultTo} placeholder="you@dubairapidproperties.com" />
+        <TestButton />
+      </div>
+      <p className="text-xs text-[var(--muted-foreground)]">
+        Sends the email this owner would get, marked [Test], with a sample link that signs no one in.
+      </p>
+    </form>
+  );
+}
+
+function TestButton() {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" size="sm" variant="outline" disabled={pending}>
+      <Send className="size-4" />
+      {pending ? "Sending…" : "Send test"}
+    </Button>
+  );
+}
+
 /**
  * Owner portal logins for one owner: who can sign in, and a one-time link to
  * set up (or reset) a login. Staff without users.manage see the list only.
@@ -72,6 +105,8 @@ export function PortalAccess({
   logins,
   canManage,
   passwords,
+  canEmail = false,
+  staffEmail = "",
 }: {
   ownerId: string;
   defaultEmail: string | null;
@@ -79,6 +114,10 @@ export function PortalAccess({
   canManage: boolean;
   /** env.ownerPasswords: whether the link leads to choosing a password. */
   passwords: boolean;
+  /** The portal can send email itself (Resend). */
+  canEmail?: boolean;
+  /** The signed-in staff member's address, for test emails. */
+  staffEmail?: string;
 }) {
   const [state, action] = useActionState<PortalAccessState, FormData>(grantPortalAccess, {});
 
@@ -162,11 +201,13 @@ export function PortalAccess({
             <Submit hasLogin={logins.length > 0} />
             <p className="text-xs text-[var(--muted-foreground)]">
               {passwords
-                ? "Creates a one-time link for the owner to set their own password. Use it again any time an owner forgets their password."
-                : "Creates a one-time link that opens the owner portal directly. Create a new one each time the owner needs to open it."}
+                ? "Creates a link for the owner to set their own password. Use it again any time an owner forgets their password."
+                : "Creates a link that opens the owner portal directly. Create a new one each time the owner needs to open it."}
             </p>
           </form>
         )}
+
+        {canManage && canEmail && <SendTestEmail ownerId={ownerId} defaultTo={staffEmail} />}
 
         {state.link && (
           <div className="space-y-3 rounded-lg border border-[var(--success)]/40 bg-[var(--success)]/10 p-3">

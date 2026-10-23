@@ -292,3 +292,54 @@ export async function revokePortalAccess(formData: FormData): Promise<void> {
 
   revalidatePath(`/owners/${ownerId}`);
 }
+
+const testEmailSchema = z.object({
+  ownerId: z.string().uuid(),
+  to: z.string().trim().toLowerCase().email("Enter the email address to send the test to."),
+});
+
+/**
+ * Sends the invite exactly as this owner would get it, to a staff member's
+ * address, to see how it looks. Its link is a sample that signs no one in.
+ */
+export async function emailInviteTest(_prev: InviteEmailState, formData: FormData): Promise<InviteEmailState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "users.manage")) {
+    return { error: "Only a super admin can send portal invitations." };
+  }
+  if (!emailConfigured()) {
+    return { error: "Email is not set up yet (EMAIL_PROVIDER and RESEND_API_KEY)." };
+  }
+  const parsed = testEmailSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Enter an email address." };
+  const { ownerId, to } = parsed.data;
+
+  const supabase = await createClient();
+  const { data: owner } = await supabase
+    .from("owners")
+    .select("full_name, email")
+    .eq("id", ownerId)
+    .maybeSingle();
+  if (!owner) return { error: "Owner not found." };
+
+  const invite = buildPortalInvite({
+    ownerName: owner.full_name,
+    email: owner.email ?? to,
+    link: `${env.ownerUrl}/auth/confirm?${new URLSearchParams({ invite: "test-sample-link", type: "invite" })}`,
+    portalUrl: env.ownerUrl,
+    company: await companyForInvite(supabase),
+    mode: env.ownerPasswords ? "password" : "link",
+    linkValidHours: env.ownerLinkValidHours,
+  });
+  const result = await sendMessage({
+    channel: "email",
+    to,
+    subject: `[Test] ${invite.subject}`,
+    body: invite.text,
+    html: invite.html,
+  });
+  if (!result.ok || result.skipped) {
+    return { error: `The email was not sent: ${result.error ?? "email is not set up"}` };
+  }
+  return { sentTo: to };
+}
