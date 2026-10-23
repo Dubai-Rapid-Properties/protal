@@ -12,6 +12,9 @@ type Company = Tables<"company_settings"> | null;
 const UTILITIES = new Set(["EXP-OTHER-FEES", "EXP-DEWA", "EXP-CHILLER"]);
 const MAINTENANCE = new Set(["EXP-MAINT", "EXP-HOUSEKEEP"]);
 
+const stayNights = (l: Line) =>
+  Math.round((Date.parse(l.check_out ?? "") - Date.parse(l.check_in ?? "")) / 86_400_000);
+
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-neutral-200 p-3">
@@ -292,7 +295,13 @@ export function StatementDocument({
                     <td className="whitespace-nowrap py-1.5 pr-2">
                       {line.check_out ? formatDate(line.check_out) : formatDate(line.entry_date)}
                     </td>
-                    <td className="py-1.5 pr-2 text-right">{line.nights ?? "—"}</td>
+                    <td className="py-1.5 pr-2 text-right">
+                      {line.nights ?? "—"}
+                      {/* A long stay is paid by the nights in each period (0059) */}
+                      {line.nights != null && line.check_in && line.check_out && stayNights(line) !== line.nights && (
+                        <span className="block text-xs text-neutral-500">of {stayNights(line)}</span>
+                      )}
+                    </td>
                     <td className="py-1.5 pr-2 text-right">{formatAED(line.amount_aed)}</td>
                     <td className="py-1.5 pr-2 text-right">{fee == null ? "—" : `(${formatAED(fee)})`}</td>
                     <td className="py-1.5 text-right">{formatAED(Number(line.amount_aed) - (fee ?? 0))}</td>

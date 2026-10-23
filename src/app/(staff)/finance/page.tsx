@@ -165,7 +165,7 @@ export default async function FinancePage({
       ) : entries.length === 0 ? (
         <EmptyState
           title="No entries in this period"
-          description="Income is posted automatically when a rent cheque clears, and when a holiday-home stay ends (its payout, once the stay has a price). Expenses can be recorded against a unit."
+          description="Income is posted automatically when a rent cheque clears, and for holiday-home stays by the nights in each statement period, 16th to 15th (the payout, once the stay has a price). Expenses can be recorded against a unit."
           icon={<Receipt className="size-8" />}
         />
       ) : (

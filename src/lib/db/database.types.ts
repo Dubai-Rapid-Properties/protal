@@ -2311,6 +2311,7 @@ export type Database = {
           recorded_by: string | null;
           created_at: string;
           updated_at: string;
+          stay_nights: number | null;
         };
         Insert: {
           id?: string;
@@ -2334,6 +2335,7 @@ export type Database = {
           recorded_by?: string | null;
           created_at?: string;
           updated_at?: string;
+          stay_nights?: number | null;
         };
         Update: {
           id?: string;
@@ -2357,6 +2359,7 @@ export type Database = {
           recorded_by?: string | null;
           created_at?: string;
           updated_at?: string;
+          stay_nights?: number | null;
         };
         Relationships: [
           {
