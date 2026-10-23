@@ -90,7 +90,7 @@ export async function buildStatementPdf(input: {
   draw(`Period ${period}`, W - M, y - 42, { size: 8.5, color: MUTED, right: true });
   if (statement.issued_on) draw(`Issued ${formatDate(statement.issued_on)}`, W - M, y - 54, { size: 8.5, color: MUTED, right: true });
   y -= logoW * (506 / 953) + 16;
-  draw(company?.legal_name ?? "DRP Real Estate Brokers LLC", M, y, { size: 10, f: bold });
+  draw(company?.legal_name ?? "DRP Holiday Homes LLC", M, y, { size: 10, f: bold });
   const companyLines = [
     company?.registered_address,
     [company?.trade_licence_number && `Trade Licence ${company.trade_licence_number}`, company?.rera_broker_number && `RERA ${company.rera_broker_number}`]

@@ -10,6 +10,7 @@ export type ActionState = { error?: string; success?: string };
 
 const schema = z.object({
   legalName: z.string().min(2).max(200),
+  statementLegalName: z.string().trim().min(2, "Enter the name for owner statements").max(200),
   tradeName: z.string().min(1).max(100),
   tradeLicenceNumber: z.string().max(60).optional(),
   reraBrokerNumber: z.string().max(60).optional(),
@@ -55,6 +56,7 @@ export async function updateCompanySettings(
     .from("company_settings")
     .update({
       legal_name: input.legalName,
+      statement_legal_name: input.statementLegalName,
       trade_name: input.tradeName,
       trade_licence_number: input.tradeLicenceNumber || null,
       rera_broker_number: input.reraBrokerNumber || null,

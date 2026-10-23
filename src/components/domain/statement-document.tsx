@@ -84,7 +84,8 @@ export function StatementDocument({
         <div>
           <Logo imageClassName="w-32" />
           <p className="mt-3 text-sm font-medium">
-            {company?.legal_name ?? "DRP Real Estate Brokers LLC"}
+            {/* Owner statements are issued by the holiday-home company (0061) */}
+            {company?.statement_legal_name || company?.legal_name || "DRP Holiday Homes LLC"}
           </p>
           <p className="mt-1 text-xs leading-relaxed text-neutral-600">
             {company?.registered_address}
