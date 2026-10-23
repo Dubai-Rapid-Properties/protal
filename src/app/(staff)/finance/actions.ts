@@ -11,6 +11,7 @@ import { sendMessage } from "@/lib/messaging";
 import { dubaiToday } from "@/lib/calendar";
 import { flushEmailsSoon } from "@/lib/notify/flush";
 import { buildStatementEmail } from "@/lib/statements/email";
+import { buildStatementPdf } from "@/lib/statements/pdf";
 
 export type ActionState = { error?: string; success?: string };
 
@@ -298,7 +299,7 @@ export async function returnStatement(statementId: string, note: string): Promis
 
 /**
  * The approver approves a statement waiting for approval and emails it to
- * the owner: the summary and the booking breakdown, in the email itself.
+ * the owner: a short note on the period, with the statement as a PDF.
  * Nothing changes unless the email went out.
  */
 export async function approveAndSendStatement(statementId: string): Promise<ActionState> {
@@ -308,11 +309,15 @@ export async function approveAndSendStatement(statementId: string): Promise<Acti
 
   const supabase = await createClient();
   const [{ data: statement }, { data: lines }, { data: company }] = await Promise.all([
-    supabase.from("owner_statements").select("*, owners(full_name, email)").eq("id", statementId).maybeSingle(),
+    supabase
+      .from("owner_statements")
+      .select("*, owners(full_name, email, phone, address_line, trn)")
+      .eq("id", statementId)
+      .maybeSingle(),
     supabase.from("owner_statement_lines").select("*").eq("statement_id", statementId).order("sort_order"),
     supabase
       .from("company_settings")
-      .select("trade_name, legal_name, registered_address, phone, email, vat_rate")
+      .select("trade_name, legal_name, registered_address, trade_licence_number, rera_broker_number, trn, phone, email, vat_rate")
       .maybeSingle(),
   ]);
   if (!statement) return { error: "Statement not found." };
@@ -322,14 +327,23 @@ export async function approveAndSendStatement(statementId: string): Promise<Acti
   const to = statement.owners?.email?.trim();
   if (!to) return { error: "The owner has no email address. Add it on the owner's page, then approve." };
 
-  const message = buildStatementEmail({
-    statement,
+  const ownerName = statement.owners?.full_name ?? "Owner";
+  const today = dubaiToday();
+  const pdf = await buildStatementPdf({
+    statement: { ...statement, issued_on: today },
     lines: lines ?? [],
-    ownerName: statement.owners?.full_name ?? "Owner",
+    owner: { ...statement.owners, full_name: ownerName },
     company,
-    portalUrl: env.ownerUrl,
   });
-  const result = await sendMessage({ channel: "email", to, subject: message.subject, body: message.text, html: message.html });
+  const message = buildStatementEmail({ statement, ownerName, company, portalUrl: env.ownerUrl });
+  const result = await sendMessage({
+    channel: "email",
+    to,
+    subject: message.subject,
+    body: message.text,
+    html: message.html,
+    attachments: [{ filename: message.filename, content: pdf }],
+  });
   if (!result.ok || result.skipped) {
     return { error: `The statement was not sent: ${result.error ?? "email is not set up"}` };
   }
@@ -339,7 +353,7 @@ export async function approveAndSendStatement(statementId: string): Promise<Acti
     .from("owner_statements")
     .update({
       status: "issued",
-      issued_on: dubaiToday(),
+      issued_on: today,
       approved_by: profile.id,
       approved_at: now,
       sent_at: now,
