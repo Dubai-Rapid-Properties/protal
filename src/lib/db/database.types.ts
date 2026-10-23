@@ -2421,6 +2421,7 @@ export type Database = {
         Row: {
           id: string;
           ticket_number: string;
+          photo_paths: string[] | null;
           unit_id: string;
           lease_id: string | null;
           booking_id: string | null;
@@ -2459,6 +2460,7 @@ export type Database = {
         Insert: {
           id?: string;
           ticket_number: string;
+          photo_paths?: string[] | null;
           unit_id: string;
           lease_id?: string | null;
           booking_id?: string | null;
@@ -2497,6 +2499,7 @@ export type Database = {
         Update: {
           id?: string;
           ticket_number?: string;
+          photo_paths?: string[] | null;
           unit_id?: string;
           lease_id?: string | null;
           booking_id?: string | null;
@@ -5462,6 +5465,10 @@ export type Database = {
       link_channel_stay: {
         Args: Record<string, unknown>;
         Returns: unknown;
+      };
+      add_ticket_photo: {
+        Args: { p_ticket_id: string; p_path: string };
+        Returns: undefined;
       };
       claim_notification_pushes: {
         Args: Record<string, never>;

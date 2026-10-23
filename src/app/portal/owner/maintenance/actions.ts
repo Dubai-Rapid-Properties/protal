@@ -1,14 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 import { TICKET_CATEGORIES } from "@/lib/labels";
 import type { Enums } from "@/lib/db/database.types";
 import { createClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/auth/session";
 
-export type ActionState = { error?: string; success?: string };
+/** `id`: the ticket reportIssue made; the form then sends its photos and opens it. */
+export type ActionState = { error?: string; success?: string; id?: string };
 
 const schema = z.object({
   ticketId: z.string().uuid(),
@@ -119,5 +119,5 @@ export async function reportIssue(_prev: ActionState, formData: FormData): Promi
   }
 
   revalidatePath("/portal/owner/maintenance");
-  redirect(`/portal/owner/maintenance/${data}?sent=1`);
+  return { id: data as string };
 }

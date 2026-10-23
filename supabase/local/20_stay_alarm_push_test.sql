@@ -60,12 +60,9 @@ begin
   perform pg_temp.act_as(pm);
   perform save_push_subscription('https://push.example/pm', 'k3', 'a3', 'Phone');
   perform set_config('role', 'postgres', true);
+  -- Owners save devices too since 0051 (their notifications), but never get the alarm.
   perform pg_temp.act_as(owner);
-  begin
-    perform save_push_subscription('https://push.example/owner', 'k4', 'a4', 'Phone');
-    raise exception 'TEST 200 FAILED: an owner saved a device';
-  exception when insufficient_privilege then null;
-  end;
+  perform save_push_subscription('https://push.example/owner', 'k4', 'a4', 'Phone');
   perform set_config('role', 'postgres', true);
   perform pg_temp.act_as(admin);
   begin
@@ -84,7 +81,7 @@ begin
   exception when insufficient_privilege then null;
   end;
   perform set_config('role', 'postgres', true);
-  raise notice 'TEST 200 PASS  staff save their phone; owners cannot; only the server reads them';
+  raise notice 'TEST 200 PASS  staff and owners save their phone; only the server reads them';
 
   -- TEST 201 - each ring goes to the super admin and the unit's housekeeping only.
   if pg_temp.pushes(v_day, '10:59') <> '' then raise exception 'TEST 201 FAILED: pushes before 11:00'; end if;

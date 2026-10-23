@@ -1,8 +1,12 @@
 "use client";
 
+import * as React from "react";
 import { useActionState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { FormError, FormSection, SelectField, SubmitBar } from "@/components/domain/form";
 import { TicketFields } from "@/components/domain/ticket-fields";
+import { PhotoChooser, uploadTicketPhotos } from "@/components/domain/ticket-photos";
 import type { TicketKind } from "@/lib/labels";
 import { createTicket, type ActionState } from "../actions";
 
@@ -22,7 +26,26 @@ export function TicketForm({
   defaultUnitId?: string;
   defaultKind: TicketKind;
 }) {
+  const router = useRouter();
   const [state, action] = useActionState<ActionState, FormData>(createTicket, {});
+  const [photos, setPhotos] = React.useState<File[]>([]);
+  const [uploading, setUploading] = React.useState(false);
+
+  // The ticket exists: send its photos, then open it.
+  React.useEffect(() => {
+    if (!state.id) return;
+    const id = state.id;
+    (async () => {
+      if (photos.length) {
+        setUploading(true);
+        const added = await uploadTicketPhotos(id, photos);
+        if (added < photos.length) toast.warning("Ticket created. Add the missing photos on its page.");
+      }
+      router.push(`/maintenance/${id}`);
+    })();
+    // Only when a new ticket id arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.id]);
 
   return (
     <form action={action} className="space-y-5">
@@ -41,7 +64,14 @@ export function TicketForm({
       <FormSection title="The issue">
         <TicketFields defaultKind={defaultKind} />
       </FormSection>
-      <SubmitBar label="Create ticket" pendingLabel="Creating…" cancelHref="/maintenance" />
+      <FormSection title="Photos" description="Photos of the problem help whoever fixes it." columns={1}>
+        <PhotoChooser files={photos} onChange={setPhotos} disabled={uploading || Boolean(state.id)} />
+      </FormSection>
+      <SubmitBar
+        label={uploading ? "Uploading photos…" : "Create ticket"}
+        pendingLabel="Creating…"
+        cancelHref="/maintenance"
+      />
     </form>
   );
 }
