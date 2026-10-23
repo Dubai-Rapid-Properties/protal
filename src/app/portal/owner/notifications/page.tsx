@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/domain/shared";
 import { NotificationList } from "@/components/domain/notification-list";
+import { TestNotificationButton } from "@/components/domain/test-notification-button";
 
 export const metadata = { title: "Notifications" };
 
@@ -16,7 +17,11 @@ export default async function NotificationsPage() {
 
   return (
     <>
-      <PageHeader title="Notifications" description="New, changed and cancelled bookings." />
+      <PageHeader
+        title="Notifications"
+        description="New, changed and cancelled bookings."
+        actions={<TestNotificationButton />}
+      />
       <NotificationList rows={data ?? []} />
     </>
   );
