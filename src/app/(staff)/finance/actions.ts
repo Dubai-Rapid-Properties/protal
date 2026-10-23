@@ -19,7 +19,7 @@ const statementSchema = z.object({
     .min(0, "The management fee cannot be negative")
     .max(100, "The management fee cannot be over 100%"),
   feeVat: z.literal("on").optional(),
-  // Other fees, item by item: what each is for and its amount (0055).
+  // Utility fees, item by item: what each is for and its amount (0055).
   otherItems: z
     .string()
     .default("[]")
@@ -27,7 +27,7 @@ const statementSchema = z.object({
       try {
         return JSON.parse(text) as unknown;
       } catch {
-        ctx.addIssue({ code: "custom", message: "Check the other fees." });
+        ctx.addIssue({ code: "custom", message: "Check the utility fees." });
         return z.NEVER;
       }
     })
@@ -35,8 +35,8 @@ const statementSchema = z.object({
       z
         .array(
           z.object({
-            description: z.string().trim().min(1, "Say what each other fee is for").max(200),
-            amount: z.coerce.number().positive("Each other fee needs an amount above 0").max(10_000_000),
+            description: z.string().trim().min(1, "Say what each utility fee is for").max(200),
+            amount: z.coerce.number().positive("Each utility fee needs an amount above 0").max(10_000_000),
           })
         )
         .max(50)

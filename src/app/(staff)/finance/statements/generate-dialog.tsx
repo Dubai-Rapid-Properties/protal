@@ -40,7 +40,7 @@ export function GenerateStatementDialog({
 }) {
   const [open, setOpen] = React.useState(false);
   const [state, action] = useActionState<ActionState, FormData>(generateStatement, {});
-  // Other fees, item by item: what each is for and its amount.
+  // Utility fees, item by item: what each is for and its amount.
   const [items, setItems] = React.useState<{ key: number; description: string; amount: string }[]>([]);
   const nextKey = React.useRef(0);
   const otherTotal = items.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
@@ -72,7 +72,7 @@ export function GenerateStatementDialog({
             <DialogDescription>
               Collected income and owner-borne expenses for the period are pulled from
               the ledger. The management fee is the % you set here, of that income;
-              other fees are taken off item by item, each under its own name.
+              utility fees are taken off item by item, each under its own name.
             </DialogDescription>
           </DialogHeader>
 
@@ -136,7 +136,7 @@ export function GenerateStatementDialog({
             </div>
 
             <div className="space-y-2">
-              <Label>Other fees</Label>
+              <Label>Utility fees</Label>
               <input
                 type="hidden"
                 name="otherItems"
@@ -145,15 +145,15 @@ export function GenerateStatementDialog({
               {items.map((item, n) => (
                 <div key={item.key} className="flex gap-2">
                   <Input
-                    aria-label={`Other fee ${n + 1}: what it is for`}
-                    placeholder="What for, e.g. DEWA"
+                    aria-label={`Utility fee ${n + 1}: what it is for`}
+                    placeholder="e.g. DEWA, Etisalat, gas"
                     required
                     maxLength={200}
                     value={item.description}
                     onChange={(e) => setItem(item.key, "description", e.target.value)}
                   />
                   <Input
-                    aria-label={`Other fee ${n + 1}: amount (AED)`}
+                    aria-label={`Utility fee ${n + 1}: amount (AED)`}
                     placeholder="AED"
                     type="number"
                     inputMode="decimal"
@@ -169,7 +169,7 @@ export function GenerateStatementDialog({
                     size="icon"
                     variant="ghost"
                     className="shrink-0"
-                    aria-label={`Remove other fee ${n + 1}`}
+                    aria-label={`Remove utility fee ${n + 1}`}
                     onClick={() => setItems((list) => list.filter((i) => i.key !== item.key))}
                   >
                     <X className="size-4" />
@@ -190,7 +190,7 @@ export function GenerateStatementDialog({
             </div>
 
             <p className="text-xs text-[var(--muted-foreground)]">
-              Net payout = income − expenses − management fee − VAT on the fee − other fees.
+              Net payout = income − expenses − management fee − VAT on the fee − utility fees.
               Ledger lines already carried on another statement are skipped, so the same
               income can never be paid out twice.
             </p>
