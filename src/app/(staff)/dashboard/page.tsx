@@ -142,6 +142,8 @@ export default async function DashboardPage() {
   );
 
   const showFinance = can(profile.role, "finance.view");
+  // Housekeeping sees their day and the open tickets, nothing else.
+  const housekeeping = profile.role === "maintenance";
 
   const movements: Movement[] = (movementsResult.data ?? []).map((b) => ({
     id: b.id,
@@ -159,7 +161,11 @@ export default async function DashboardPage() {
     <>
       <PageHeader
         title={`Good day, ${(profile.full_name || "there").split(" ")[0]}`}
-        description="Portfolio health, compliance exposure and the last 30 days."
+        description={
+          housekeeping
+            ? "Today's and tomorrow's check-ins and check-outs, and the open repairs."
+            : "Portfolio health, compliance exposure and the last 30 days."
+        }
       />
 
       {/* Housekeeping's day: what to clean and get ready */}
@@ -167,49 +173,51 @@ export default async function DashboardPage() {
         <StayMovements today={today} tomorrow={tomorrow} movements={movements} />
       )}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard
-          label="Units under management"
-          value={totalUnits}
-          sublabel={`${occupied} leased · ${listedShort} short-term · ${vacant} vacant`}
-          icon={<DoorOpen className="size-5" />}
-          href="/units"
-        />
-        <StatCard
-          label="Occupancy"
-          value={`${occupancyRate}%`}
-          sublabel={`Last 30 nights · ${stays.nights} booked nights`}
-          icon={<TrendingUp className="size-5" />}
-          tone={occupancyRate >= 85 ? "success" : occupancyRate >= 70 ? "warning" : "danger"}
-        />
-        {showFinance ? (
+      {!housekeeping && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatCard
-            label="Income · last 30 days"
-            value={formatAED(income, { decimals: false })}
-            sublabel={`Expenses ${formatAED(expenses, { decimals: false })}`}
-            icon={<Building2 className="size-5" />}
-            tone="brand"
-            href="/finance"
+            label="Units under management"
+            value={totalUnits}
+            sublabel={`${occupied} leased · ${listedShort} short-term · ${vacant} vacant`}
+            icon={<DoorOpen className="size-5" />}
+            href="/units"
           />
-        ) : (
           <StatCard
-            label="Open tickets"
-            value={tickets.length}
-            sublabel="Maintenance awaiting action"
-            icon={<Wrench className="size-5" />}
+            label="Occupancy"
+            value={`${occupancyRate}%`}
+            sublabel={`Last 30 nights · ${stays.nights} booked nights`}
+            icon={<TrendingUp className="size-5" />}
+            tone={occupancyRate >= 85 ? "success" : occupancyRate >= 70 ? "warning" : "danger"}
           />
-        )}
-        <StatCard
-          label="Compliance breaches"
-          value={breaches}
-          sublabel={breaches === 0 ? "Nothing urgent" : "Urgent or overdue"}
-          icon={<ShieldAlert className="size-5" />}
-          tone={breaches === 0 ? "success" : "danger"}
-          href="/compliance"
-        />
-      </div>
+          {showFinance ? (
+            <StatCard
+              label="Income · last 30 days"
+              value={formatAED(income, { decimals: false })}
+              sublabel={`Expenses ${formatAED(expenses, { decimals: false })}`}
+              icon={<Building2 className="size-5" />}
+              tone="brand"
+              href="/finance"
+            />
+          ) : (
+            <StatCard
+              label="Open tickets"
+              value={tickets.length}
+              sublabel="Maintenance awaiting action"
+              icon={<Wrench className="size-5" />}
+            />
+          )}
+          <StatCard
+            label="Compliance breaches"
+            value={breaches}
+            sublabel={breaches === 0 ? "Nothing urgent" : "Urgent or overdue"}
+            icon={<ShieldAlert className="size-5" />}
+            tone={breaches === 0 ? "success" : "danger"}
+            href="/compliance"
+          />
+        </div>
+      )}
 
-      {permitGaps.length > 0 && (
+      {!housekeeping && permitGaps.length > 0 && (
         <Card className="mt-6 border-[var(--destructive)]/40 bg-[var(--destructive)]/5">
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
@@ -237,60 +245,62 @@ export default async function DashboardPage() {
         </Card>
       )}
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="flex-row items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <CalendarClock className="size-4" />
-              Expiring soon
-            </CardTitle>
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/compliance">View all</Link>
-            </Button>
-          </CardHeader>
-          <CardContent className="p-0">
-            {compliance.length === 0 ? (
-              <div className="p-5">
-                <EmptyState
-                  title="Nothing expiring"
-                  description="Every Ejari registration, DET permit and management agreement is current."
-                />
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Item</TableHead>
-                    <TableHead className="hidden sm:table-cell">Due</TableHead>
-                    <TableHead className="text-right">Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {compliance.map((item, i) => (
-                    <TableRow key={`${item.kind}-${i}`}>
-                      <TableCell>
-                        <p className="break-words font-medium">{item.label}</p>
-                        <p className="text-xs text-[var(--muted-foreground)]">
-                          {item.kind ? COMPLIANCE_KIND[item.kind] : "—"}
-                          <span className="sm:hidden"> · {formatDate(item.due_date)}</span>
-                        </p>
-                      </TableCell>
-                      <TableCell className="tabular hidden whitespace-nowrap text-sm sm:table-cell">
-                        {formatDate(item.due_date)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <ComplianceBadge
-                          severity={item.severity ?? "missing"}
-                          daysRemaining={item.days_remaining}
-                        />
-                      </TableCell>
+      <div className={housekeeping ? "mt-6" : "mt-6 grid gap-6 lg:grid-cols-2"}>
+        {!housekeeping && (
+          <Card>
+            <CardHeader className="flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <CalendarClock className="size-4" />
+                Expiring soon
+              </CardTitle>
+              <Button asChild variant="ghost" size="sm">
+                <Link href="/compliance">View all</Link>
+              </Button>
+            </CardHeader>
+            <CardContent className="p-0">
+              {compliance.length === 0 ? (
+                <div className="p-5">
+                  <EmptyState
+                    title="Nothing expiring"
+                    description="Every Ejari registration, DET permit and management agreement is current."
+                  />
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Item</TableHead>
+                      <TableHead className="hidden sm:table-cell">Due</TableHead>
+                      <TableHead className="text-right">Status</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {compliance.map((item, i) => (
+                      <TableRow key={`${item.kind}-${i}`}>
+                        <TableCell>
+                          <p className="break-words font-medium">{item.label}</p>
+                          <p className="text-xs text-[var(--muted-foreground)]">
+                            {item.kind ? COMPLIANCE_KIND[item.kind] : "—"}
+                            <span className="sm:hidden"> · {formatDate(item.due_date)}</span>
+                          </p>
+                        </TableCell>
+                        <TableCell className="tabular hidden whitespace-nowrap text-sm sm:table-cell">
+                          {formatDate(item.due_date)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <ComplianceBadge
+                            severity={item.severity ?? "missing"}
+                            daysRemaining={item.days_remaining}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader className="flex-row items-center justify-between">
