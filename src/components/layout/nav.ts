@@ -1,4 +1,4 @@
-import type { Capability } from "@/lib/auth/rbac";
+import type { Capability, Role } from "@/lib/auth/rbac";
 
 /**
  * Navigation is derived from capabilities, not from role names, so adding a
@@ -16,6 +16,8 @@ export interface NavItem {
   href: string;
   icon: string;
   capability: Capability;
+  /** Roles that have the capability but do not need the page in their menu. */
+  hideFor?: Role[];
 }
 
 export interface NavSection {
@@ -35,8 +37,9 @@ export const STAFF_NAV: NavSection[] = [
   {
     label: "Portfolio",
     items: [
-      { label: "Properties", href: "/properties", icon: "Building2", capability: "units.view" },
-      { label: "Units", href: "/units", icon: "DoorOpen", capability: "units.view" },
+      // Housekeeping works from the dashboard, bookings and tickets.
+      { label: "Properties", href: "/properties", icon: "Building2", capability: "units.view", hideFor: ["maintenance"] },
+      { label: "Units", href: "/units", icon: "DoorOpen", capability: "units.view", hideFor: ["maintenance"] },
       { label: "Owners", href: "/owners", icon: "Users", capability: "owners.view" },
     ],
   },

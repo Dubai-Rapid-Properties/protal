@@ -43,7 +43,7 @@ export function Sidebar({
   const visible = sections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => can(role, item.capability)),
+      items: section.items.filter((item) => can(role, item.capability) && !(role && item.hideFor?.includes(role))),
     }))
     .filter((section) => section.items.length > 0);
 
