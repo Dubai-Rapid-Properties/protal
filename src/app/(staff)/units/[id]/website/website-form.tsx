@@ -19,6 +19,9 @@ export interface WebsiteDefaults {
   lat: string; lng: string; mapsUrl: string; checkIn: string; checkOut: string; seasons: string;
   /** Sleeping arrangements as text; null when the database doesn't have the column yet (migration 0030). */
   beds: string | null;
+  /** The unit's own prices and guests, which the website shows (AED; % for discounts). */
+  nightlyRate: string; weekendRate: string; cleaningFee: string;
+  weeklyDiscount: string; monthlyDiscount: string; maxGuests: string;
 }
 
 export function WebsiteForm({ unitId, d }: { unitId: string; d: WebsiteDefaults }) {
@@ -83,8 +86,7 @@ export function WebsiteForm({ unitId, d }: { unitId: string; d: WebsiteDefaults 
         <label className="flex items-center gap-2 text-sm sm:col-span-2">
           <input type="checkbox" name="published" defaultChecked={d.published} className="size-4" />
           <span>
-            <strong>Published</strong> — show this home on the Holiday Homes website and take bookings. Nightly rate,
-            guests and cleaning fee come from the unit&apos;s own details.
+            <strong>Published</strong> — show this home on the Holiday Homes website and take bookings.
           </span>
         </label>
         <TextField name="title" label="Title" defaultValue={d.title} placeholder="Marina Gate 1 · 2 BR Marina View" />
@@ -190,6 +192,65 @@ export function WebsiteForm({ unitId, d }: { unitId: string; d: WebsiteDefaults 
           />
         </FormSection>
       ) : null}
+
+      <FormSection title="Price and guests">
+        <TextField
+          name="nightlyRate"
+          label="Nightly rate (AED)"
+          type="number"
+          inputMode="decimal"
+          min={1}
+          step="0.01"
+          required
+          defaultValue={d.nightlyRate}
+          hint="Sunday to Thursday nights. The website's price per night."
+        />
+        <TextField
+          name="weekendRate"
+          label="Weekend rate (AED)"
+          type="number"
+          inputMode="decimal"
+          min={0}
+          step="0.01"
+          defaultValue={d.weekendRate}
+          placeholder="Same as nightly"
+          hint="Friday and Saturday nights."
+        />
+        <TextField
+          name="cleaningFee"
+          label="Cleaning fee (AED)"
+          type="number"
+          inputMode="decimal"
+          min={0}
+          step="0.01"
+          defaultValue={d.cleaningFee}
+          placeholder="0"
+          hint="Once per stay."
+        />
+        <TextField name="maxGuests" label="Max guests" type="number" min={1} max={30} required defaultValue={d.maxGuests} />
+        <TextField
+          name="weeklyDiscount"
+          label="Weekly discount (%)"
+          type="number"
+          min={0}
+          max={99}
+          step="0.01"
+          defaultValue={d.weeklyDiscount}
+          placeholder="0"
+          hint="Stays of 7 nights or more."
+        />
+        <TextField
+          name="monthlyDiscount"
+          label="Monthly discount (%)"
+          type="number"
+          min={0}
+          max={99}
+          step="0.01"
+          defaultValue={d.monthlyDiscount}
+          placeholder="0"
+          hint="Stays of 28 nights or more."
+        />
+      </FormSection>
 
       <FormSection title="Seasonal rates" columns={1}>
         <TextAreaField

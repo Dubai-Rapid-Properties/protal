@@ -2,6 +2,8 @@ import { imagesOf, type UnitRow } from "@/lib/website-homes";
 import { bedsToText, seasonsToText } from "@/lib/website-options";
 import type { WebsiteDefaults } from "./website-form";
 
+const str = (v: number | string | null | undefined) => (v == null ? "" : String(v));
+
 /** The unit's website details as the Website form shows them. */
 export function websiteDefaults(u: UnitRow): WebsiteDefaults {
   return {
@@ -25,5 +27,11 @@ export function websiteDefaults(u: UnitRow): WebsiteDefaults {
     seasons: seasonsToText(u.website_seasons),
     // null until migration 0030 adds the column: the form then leaves the field out.
     beds: "website_beds" in u ? bedsToText(u.website_beds) : null,
+    nightlyRate: str(u.base_nightly_rate_aed),
+    weekendRate: str(u.weekend_rate_aed),
+    cleaningFee: str(u.cleaning_fee_aed),
+    weeklyDiscount: str(u.weekly_discount_pct),
+    monthlyDiscount: str(u.monthly_discount_pct),
+    maxGuests: str(u.max_guests),
   };
 }
