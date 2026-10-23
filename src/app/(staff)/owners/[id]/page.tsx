@@ -206,6 +206,8 @@ export default async function OwnerDetailPage({
               logins={logins}
               canManage={can(profile.role, "users.manage")}
               passwords={env.ownerPasswords}
+              canEmail={env.messaging.emailProvider === "resend" && Boolean(env.messaging.resendApiKey)}
+              staffEmail={profile.email ?? ""}
             />
 
             <Card>
