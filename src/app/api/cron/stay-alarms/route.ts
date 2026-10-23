@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { pushStayAlarms } from "@/lib/push/stay-alarms";
+import { pushNotifications } from "@/lib/push/notifications";
 import { env } from "@/lib/env";
 
 /**
@@ -30,8 +31,11 @@ async function handle(request: NextRequest) {
   }
 
   try {
-    const result = await pushStayAlarms(createAdminClient());
-    return NextResponse.json({ ok: result.failed === 0, ...result });
+    const admin = createAdminClient();
+    const result = await pushStayAlarms(admin);
+    // Every two minutes, any notification not on the phones yet (0051).
+    const notifications = await pushNotifications(admin).catch((e: Error) => ({ error: e.message }));
+    return NextResponse.json({ ok: result.failed === 0, ...result, notifications });
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "unknown" },

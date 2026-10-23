@@ -2,7 +2,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { HistoryNav } from "@/components/layout/history-nav";
 import { AirbnbBlockAlarmBanner } from "@/components/layout/airbnb-block-alarm";
 import { StayAlarmBanner } from "@/components/layout/stay-alarm";
-import { PhoneAlarmSetup } from "@/components/layout/phone-alarm-setup";
+import { NotificationSetup } from "@/components/layout/notification-setup";
 import { STAFF_NAV } from "@/components/layout/nav";
 import { requirePortalProfile } from "@/lib/auth/session";
 import { unreadNotificationCount } from "@/lib/notify/count";
@@ -35,11 +35,11 @@ export default async function StaffLayout({
         {/* An account with alarms off (0045) gets notifications only */}
         {profile.role === "super_admin" && !profile.alarms_off && <AirbnbBlockAlarmBanner />}
         {(profile.role === "super_admin" || profile.role === "maintenance") && !profile.alarms_off && (
-          <>
-            <StayAlarmBanner />
-            <PhoneAlarmSetup />
-          </>
+          <StayAlarmBanner />
         )}
+        <NotificationSetup
+          alarms={(profile.role === "super_admin" || profile.role === "maintenance") && !profile.alarms_off}
+        />
         <HistoryNav />
         {children}
       </main>
