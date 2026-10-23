@@ -47,8 +47,10 @@
     "BOOKINGS_SHEET": "10vH_buFA4eEM-xvQIiS4vq688IIb4_NGuW4KUqv4QMM",
     /* Owners choose a password from their invite link (src/lib/env.ts) */
     "OWNER_PASSWORDS": "on",
-    /* The portal sends its own email through Resend (RESEND_API_KEY, EMAIL_FROM: dashboard) */
-    "EMAIL_PROVIDER": "resend"
+    /* The portal sends its own email through Resend (RESEND_API_KEY: dashboard secret) */
+    "EMAIL_PROVIDER": "resend",
+    /* The sender as inboxes show it: the name, and the office address replies go to */
+    "EMAIL_FROM": "\"D|R|P Dubai Rapid Properties\" <office@dubairapidproperties.com>"
   },
   "observability": {
     "enabled": true
