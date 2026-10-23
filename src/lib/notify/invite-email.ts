@@ -44,10 +44,11 @@ const MUTED = "#6b7280";
 const escape = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-/** Name, legal name and contact. No street address: owners asked for it off. */
+/** Name, legal name, contact and address. The brand is written D|R|P, also where the address starts with it. */
 function signature(company: InviteCompany | null | undefined): string[] {
   const contact = [company?.phone, company?.email].filter(Boolean).join(" · ");
-  return ["D|R|P - Dubai Rapid Properties", company?.legal_name ?? "", contact].filter(Boolean);
+  const address = (company?.registered_address ?? "").replace(/^\s*D\W?R\W?P\b/i, "D|R|P");
+  return ["D|R|P - Dubai Rapid Properties", company?.legal_name ?? "", contact, address].filter(Boolean);
 }
 
 export function buildPortalInvite(input: InviteInput): InviteMessage {

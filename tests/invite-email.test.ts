@@ -22,7 +22,7 @@ test("the plain-text invite greets the owner, gives the link and the company's d
   assert.match(text, /set your password here:\nhttps:\/\/owner\.drp\.test\/auth\/confirm\?token_hash=abc&type=invite\n/);
   assert.match(text, /Email: tara@example\.com/);
   assert.match(text, /\+971 4 529 4904 · office@dubairapidproperties\.com/);
-  assert.doesNotMatch(text, /Golden Mile/, "no street address");
+  assert.match(text, /\nD\|R\|P, Golden Mile 09, Palm Jumeirah, Dubai$/, "the address, with the brand as D|R|P");
 });
 
 test("the HTML invite escapes names and links, and loads the logo from the portal", () => {
