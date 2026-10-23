@@ -145,6 +145,13 @@ export function StatementDocument({
               </td>
               <td className="py-1 text-right">({formatAED(statement.vat_total_aed)})</td>
             </tr>
+            {/* Other fees (0056): one sum for the owner, never what they were for */}
+            {Number(statement.other_charges_aed ?? 0) > 0 && (
+              <tr>
+                <td className="py-1">Less: other charges</td>
+                <td className="py-1 text-right">({formatAED(statement.other_charges_aed)})</td>
+              </tr>
+            )}
             <tr className="border-t-2 border-[#0F172A]">
               <td className="pt-2 text-base font-semibold">Net payable to owner</td>
               <td className="pt-2 text-right text-base font-semibold">

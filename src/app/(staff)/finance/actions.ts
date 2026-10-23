@@ -9,6 +9,30 @@ import { can } from "@/lib/auth/rbac";
 
 export type ActionState = { error?: string; success?: string };
 
+/** Fees item by item - what each is for and its amount - as the dialog sends them (JSON). */
+const feeItems = (what: string) =>
+  z
+    .string()
+    .default("[]")
+    .transform((text, ctx) => {
+      try {
+        return JSON.parse(text) as unknown;
+      } catch {
+        ctx.addIssue({ code: "custom", message: `Check the ${what}s.` });
+        return z.NEVER;
+      }
+    })
+    .pipe(
+      z
+        .array(
+          z.object({
+            description: z.string().trim().min(1, `Say what each ${what} is for`).max(200),
+            amount: z.coerce.number().positive(`Each ${what} needs an amount above 0`).max(10_000_000),
+          })
+        )
+        .max(50)
+    );
+
 const statementSchema = z.object({
   ownerId: z.string().uuid("Select an owner"),
   periodStart: z.string().min(1, "Period start is required"),
@@ -19,28 +43,10 @@ const statementSchema = z.object({
     .min(0, "The management fee cannot be negative")
     .max(100, "The management fee cannot be over 100%"),
   feeVat: z.literal("on").optional(),
-  // Utility fees, item by item: what each is for and its amount (0055).
-  otherItems: z
-    .string()
-    .default("[]")
-    .transform((text, ctx) => {
-      try {
-        return JSON.parse(text) as unknown;
-      } catch {
-        ctx.addIssue({ code: "custom", message: "Check the utility fees." });
-        return z.NEVER;
-      }
-    })
-    .pipe(
-      z
-        .array(
-          z.object({
-            description: z.string().trim().min(1, "Say what each utility fee is for").max(200),
-            amount: z.coerce.number().positive("Each utility fee needs an amount above 0").max(10_000_000),
-          })
-        )
-        .max(50)
-    ),
+  // Utility fees (0055): each listed for the owner under its own name.
+  otherItems: feeItems("utility fee"),
+  // Other fees (0056): deducted, shown to the owner only as one sum.
+  otherCharges: feeItems("other fee"),
 });
 
 /**
@@ -81,6 +87,7 @@ export async function generateStatement(
     p_fee_pct: input.feePct,
     p_fee_vat: input.feeVat === "on",
     p_other_items: input.otherItems.map((i) => ({ description: i.description, amount: Math.round(i.amount * 100) / 100 })),
+    p_other_charges: input.otherCharges.map((i) => ({ description: i.description, amount: Math.round(i.amount * 100) / 100 })),
   });
 
   if (error) {
