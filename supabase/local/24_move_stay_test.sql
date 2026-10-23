@@ -136,7 +136,7 @@ begin
 
   -- TEST 245 - a stay that already posted its income moves the line to the new owner.
   insert into bookings (unit_id, channel, status, check_in, check_out, adults, payout_expected_aed)
-  values (v_a, 'direct', 'confirmed', current_date - 9, current_date - 3, 2, 3000) returning id into v_past;
+  values (v_a, 'direct', 'confirmed', '2026-03-02', '2026-03-08', 2, 3000) returning id into v_past;
   perform post_completed_bookings();
   t := pg_temp.move_as(pm, v_past, v_b);
   perform post_completed_bookings();
@@ -148,8 +148,8 @@ begin
 
   -- TEST 246 - a cancelled stay whose payout is kept posts it; un-kept, the line goes.
   insert into bookings (unit_id, channel, status, check_in, check_out, adults)
-  values (v_b, 'airbnb', 'confirmed', current_date - 20, current_date - 12, 2) returning id into v_kept;
-  update bookings set status = 'cancelled', cancelled_on = current_date - 25,
+  values (v_b, 'airbnb', 'confirmed', '2026-04-02', '2026-04-10', 2) returning id into v_kept;
+  update bookings set status = 'cancelled', cancelled_on = '2026-03-25',
                       payout_kept = true, payout_expected_aed = 1800 where id = v_kept;
   perform post_completed_bookings();
   select * into le from ledger_entries where source_table = 'bookings' and source_id = v_kept;

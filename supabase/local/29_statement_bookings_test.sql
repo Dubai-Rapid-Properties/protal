@@ -19,6 +19,7 @@ declare
   v_b1 uuid;
   v_b2 uuid;
   v_b3 uuid;
+  v_long uuid;
   v_stmt uuid;
   s owner_statements%rowtype;
   l owner_statement_lines%rowtype;
@@ -97,6 +98,46 @@ begin
     raise exception 'TEST 294 FAILED: %', row_to_json(s);
   end if;
   raise notice 'TEST 294 PASS  occupancy counts a unit linked after the period';
+
+  -- TEST 295 - a long stay posts in parts, one per statement period (0059).
+  -- 10 Jul - 20 Sep, 72 nights, AED 7,200.50: 6, 31, 31 and 4 nights.
+  insert into bookings (unit_id, guest_id, channel, status, check_in, check_out, adults, payout_expected_aed)
+  values (v_unit, v_guest, 'direct', 'confirmed', '2026-07-10', '2026-09-20', 2, 7200.50) returning id into v_long;
+  perform post_completed_bookings();
+  if (select string_agg(entry_date || '=' || amount_aed || '/' || stay_nights, ' ' order by entry_date)
+        from ledger_entries where source_table = 'bookings' and source_id = v_long)
+     <> '2026-07-15=600.04/6 2026-08-15=3100.22/31 2026-09-15=3100.22/31 2026-09-20=400.02/4' then
+    raise exception 'TEST 295 FAILED: %', (select string_agg(entry_date || '=' || amount_aed || '/' || stay_nights, ' ' order by entry_date)
+        from ledger_entries where source_table = 'bookings' and source_id = v_long);
+  end if;
+  v_stmt := generate_owner_statement(v_owner, '2026-08-16', '2026-09-15', 20, true);
+  select * into s from owner_statements where id = v_stmt;
+  -- 3100.22 x 20% = 620.04, VAT 31.00; 31 of 31 nights booked.
+  if s.gross_income_aed <> 3100.22 or s.bookings_count <> 1 or s.rented_nights <> 31
+     or s.occupancy_pct <> 100 or s.management_fee_aed <> 620.04 or s.vat_total_aed <> 31.00
+     or (select nights from owner_statement_lines where statement_id = v_stmt and booking_id = v_long) <> 31 then
+    raise exception 'TEST 295 FAILED (statement): %', row_to_json(s);
+  end if;
+  raise notice 'TEST 295 PASS  a long stay posts by the nights in each period, adding up to its payout';
+
+  -- TEST 296 - a part in a statement is frozen; a new payout lands on the others.
+  update bookings set payout_expected_aed = 7300.50 where id = v_long;
+  perform post_completed_bookings();
+  if (select sum(amount_aed) from ledger_entries where source_table = 'bookings' and source_id = v_long) <> 7300.50
+     or (select amount_aed from ledger_entries where source_table = 'bookings' and source_id = v_long
+          and entry_date = '2026-09-15') <> 3100.22 then
+    raise exception 'TEST 296 FAILED: %', (select string_agg(entry_date || '=' || amount_aed, ' ' order by entry_date)
+        from ledger_entries where source_table = 'bookings' and source_id = v_long);
+  end if;
+  raise notice 'TEST 296 PASS  stated part frozen; the parts still add up to the new payout';
+
+  -- TEST 297 - a stay ending on the 16th is dated the 15th, in the period of its last night.
+  if (select entry_date from ledger_entries where source_table = 'bookings' and source_id = v_b3) <> '2026-06-02'
+     or (select array_agg(p.entry_date order by p.entry_date) from pms.stay_parts('2026-10-01', '2026-10-16') p)
+        <> array['2026-10-15'::date] then
+    raise exception 'TEST 297 FAILED';
+  end if;
+  raise notice 'TEST 297 PASS  a check-out on the 16th belongs to the period closing on the 15th';
 
   delete from owner_statements where owner_id = v_owner;
   delete from ledger_entries where owner_id = v_owner;
