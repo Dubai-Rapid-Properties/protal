@@ -85,3 +85,15 @@ test("many bookings run onto more pages", async () => {
   const bytes = await buildStatementPdf({ statement, lines: many, owner: { full_name: "Zhejun Shen" }, company });
   assert.ok((await PDFDocument.load(bytes)).getPageCount() >= 3);
 });
+
+test("a stay's dates on the statement stay inside its period", async () => {
+  const { stayInPeriod } = await import("@/lib/statements/summary");
+  const l = { check_in: "2026-09-18", check_out: "2027-03-31", entry_date: "2026-10-15" };
+  assert.deepEqual(stayInPeriod(l, "2026-09-16", "2026-10-15"), { checkIn: "2026-09-18", checkOut: "2026-10-15" });
+  assert.deepEqual(stayInPeriod(l, "2026-10-16", "2026-11-15"), { checkIn: "2026-10-16", checkOut: "2026-11-15" });
+  assert.deepEqual(stayInPeriod(l, "2027-03-16", "2027-04-15"), { checkIn: "2027-03-16", checkOut: "2027-03-31" });
+  assert.deepEqual(
+    stayInPeriod({ check_in: null, check_out: null, entry_date: "2026-10-01" }, "2026-09-16", "2026-10-15"),
+    { checkIn: null, checkOut: "2026-10-01" }
+  );
+});

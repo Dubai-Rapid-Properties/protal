@@ -9,7 +9,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type RGB }
 import { formatAED } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
 import { LOGO_BLACK_PNG_BASE64 } from "./logo-png";
-import { bookingFee, statementSummary } from "./summary";
+import { bookingFee, statementSummary, stayInPeriod } from "./summary";
 import type { EmailLine, EmailStatement } from "./email";
 
 export interface PdfCompany {
@@ -201,20 +201,18 @@ export async function buildStatementPdf(input: {
     for (const l of s.income) {
       need(28);
       const fee = bookingFee(l);
-      const stay = l.check_in && l.check_out ? Math.round((Date.parse(l.check_out) - Date.parse(l.check_in)) / 86_400_000) : null;
+      // Only the part of the stay inside this statement's period.
+      const stay = stayInPeriod(l, statement.period_start, statement.period_end);
       draw(l.guest_name || l.description, col.guest, y, { size: 8.5, max: 142 });
-      draw(l.check_in ? formatDate(l.check_in) : "—", col.inn, y, { size: 8.5 });
-      draw(l.check_out ? formatDate(l.check_out) : formatDate(l.entry_date), col.out, y, { size: 8.5 });
+      draw(stay.checkIn ? formatDate(stay.checkIn) : "—", col.inn, y, { size: 8.5 });
+      draw(formatDate(stay.checkOut), col.out, y, { size: 8.5 });
       draw(l.nights == null ? "—" : String(l.nights), col.nights, y, { size: 8.5, right: true });
       draw(money(Number(l.amount_aed)), col.rent, y, { size: 8.5, right: true });
       draw(fee == null ? "—" : less(fee), col.fee, y, { size: 8.5, right: true });
       draw(money(Number(l.amount_aed) - (fee ?? 0)), col.net, y, { size: 8.5, right: true });
-      if (l.unit_label || (stay != null && l.nights != null && stay !== l.nights)) {
+      if (l.unit_label) {
         y -= 10;
-        const note = [l.unit_label, stay != null && l.nights != null && stay !== l.nights ? `${l.nights} of ${stay} nights in this period` : null]
-          .filter(Boolean)
-          .join(" · ");
-        draw(note, col.guest, y, { size: 7, color: MUTED, max: 290 });
+        draw(l.unit_label, col.guest, y, { size: 7, color: MUTED, max: 290 });
       }
       y -= 8;
       rule(y);

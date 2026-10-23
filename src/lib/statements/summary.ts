@@ -31,6 +31,21 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 export const bookingFee = (l: Pick<SummaryLine, "mgmt_fee_aed" | "mgmt_fee_vat_aed">) =>
   l.mgmt_fee_aed == null ? null : Number(l.mgmt_fee_aed) + Number(l.mgmt_fee_vat_aed ?? 0);
 
+/**
+ * A booking's dates as the statement shows them: only the part inside the
+ * statement period. A stay that began before the period starts on its first
+ * day; one that runs on past it ends on its last day (YYYY-MM-DD strings).
+ */
+export function stayInPeriod(
+  l: { check_in: string | null; check_out: string | null; entry_date: string },
+  periodStart: string,
+  periodEnd: string
+): { checkIn: string | null; checkOut: string } {
+  const checkIn = l.check_in && l.check_in < periodStart ? periodStart : l.check_in;
+  const checkOut = l.check_out ? (l.check_out > periodEnd ? periodEnd : l.check_out) : l.entry_date;
+  return { checkIn, checkOut };
+}
+
 export function statementSummary<L extends SummaryLine>(statement: SummaryStatement, lines: L[]) {
   const income = lines.filter((l) => l.direction === "income");
   // Fee lines (fixed-fee agreements; before 0057 the whole fee) go with the

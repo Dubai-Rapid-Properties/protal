@@ -12,6 +12,7 @@ import { dubaiToday } from "@/lib/calendar";
 import { flushEmailsSoon } from "@/lib/notify/flush";
 import { buildStatementEmail } from "@/lib/statements/email";
 import { buildStatementPdf } from "@/lib/statements/pdf";
+import { stayInPeriod } from "@/lib/statements/summary";
 
 export type ActionState = { error?: string; success?: string };
 
@@ -442,13 +443,21 @@ export async function statementBookings(ownerId: string, periodStart: string, pe
     .lte("entry_date", periodEnd)
     .order("entry_date");
 
-  return (data ?? []).map((l) => ({
-    ledgerEntryId: l.id,
-    guest: l.bookings?.guests?.full_name || l.description,
-    unit: l.units ? `${l.units.properties?.name ?? ""} ${l.units.unit_number}`.trim() : null,
-    checkIn: l.bookings?.check_in ?? null,
-    checkOut: l.bookings?.check_out ?? l.entry_date,
-    nights: l.stay_nights ?? l.bookings?.nights ?? null,
-    amount: Number(l.amount_aed),
-  }));
+  return (data ?? []).map((l) => {
+    // Only the part of the stay inside the period, as the statement shows it.
+    const stay = stayInPeriod(
+      { check_in: l.bookings?.check_in ?? null, check_out: l.bookings?.check_out ?? null, entry_date: l.entry_date },
+      periodStart,
+      periodEnd
+    );
+    return {
+      ledgerEntryId: l.id,
+      guest: l.bookings?.guests?.full_name || l.description,
+      unit: l.units ? `${l.units.properties?.name ?? ""} ${l.units.unit_number}`.trim() : null,
+      checkIn: stay.checkIn,
+      checkOut: stay.checkOut,
+      nights: l.stay_nights ?? l.bookings?.nights ?? null,
+      amount: Number(l.amount_aed),
+    };
+  });
 }

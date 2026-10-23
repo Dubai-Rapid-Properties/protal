@@ -2,14 +2,11 @@ import { formatAED, formatPercent } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
 import type { Tables } from "@/lib/db/database.types";
 import { Logo } from "@/components/layout/logo";
-import { bookingFee, statementSummary } from "@/lib/statements/summary";
+import { bookingFee, statementSummary, stayInPeriod } from "@/lib/statements/summary";
 
 type Statement = Tables<"owner_statements">;
 type Line = Tables<"owner_statement_lines">;
 type Company = Tables<"company_settings"> | null;
-
-const stayNights = (l: Line) =>
-  Math.round((Date.parse(l.check_out ?? "") - Date.parse(l.check_in ?? "")) / 86_400_000);
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -260,6 +257,8 @@ export function StatementDocument({
             <tbody>
               {income.map((line) => {
                 const fee = bookingFee(line);
+                // Only the part of the stay inside this statement's period.
+                const stay = stayInPeriod(line, statement.period_start, statement.period_end);
                 return (
                   <tr key={line.id} className="border-b border-neutral-100 align-top">
                     <td className="py-1.5 pr-2">
@@ -269,17 +268,13 @@ export function StatementDocument({
                       )}
                     </td>
                     <td className="whitespace-nowrap py-1.5 pr-2">
-                      {line.check_in ? formatDate(line.check_in) : "—"}
+                      {stay.checkIn ? formatDate(stay.checkIn) : "—"}
                     </td>
                     <td className="whitespace-nowrap py-1.5 pr-2">
-                      {line.check_out ? formatDate(line.check_out) : formatDate(line.entry_date)}
+                      {formatDate(stay.checkOut)}
                     </td>
                     <td className="py-1.5 pr-2 text-right">
                       {line.nights ?? "—"}
-                      {/* A long stay is paid by the nights in each period (0059) */}
-                      {line.nights != null && line.check_in && line.check_out && stayNights(line) !== line.nights && (
-                        <span className="block text-xs text-neutral-500">of {stayNights(line)}</span>
-                      )}
                     </td>
                     <td className="py-1.5 pr-2 text-right">{formatAED(line.amount_aed)}</td>
                     <td className="py-1.5 pr-2 text-right">{fee == null ? "—" : `(${formatAED(fee)})`}</td>
