@@ -36,16 +36,16 @@ export interface InviteMessage {
   html: string;
 }
 
-const NAVY = "#171f30";
-const GOLD = "#c19f61";
-const INK = "#1f2937";
-const MUTED = "#6b7280";
+export const NAVY = "#171f30";
+export const GOLD = "#c19f61";
+export const INK = "#1f2937";
+export const MUTED = "#6b7280";
 
-const escape = (s: string) =>
+export const escape = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** Name, legal name, contact and address. The brand is written D|R|P, also where the address starts with it. */
-function signature(company: InviteCompany | null | undefined): string[] {
+export function signature(company: InviteCompany | null | undefined): string[] {
   const contact = [company?.phone, company?.email].filter(Boolean).join(" · ");
   const address = (company?.registered_address ?? "").replace(/^\s*D\W?R\W?P\b/i, "D|R|P");
   return ["D|R|P - Dubai Rapid Properties", company?.legal_name ?? "", contact, address].filter(Boolean);

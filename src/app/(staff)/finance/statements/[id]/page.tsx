@@ -8,7 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatementStatusBadge } from "@/components/domain/status-badge";
 import { StatementDocument } from "@/components/domain/statement-document";
 import { StatementActions } from "./statement-actions";
-import { canDeleteStatements } from "../../actions";
+import { canApproveStatements, canDeleteStatements } from "../../actions";
+import { formatDateTime } from "@/lib/dates";
 
 /** Shared by the page and its metadata, so the statement is fetched once. */
 const getStatement = cache(async (id: string) => {
@@ -51,6 +52,7 @@ export default async function StatementDetailPage({
   ]);
 
   if (!statement) notFound();
+  const canApprove = await canApproveStatements();
   const otherCharges = (Array.isArray(statement.other_charges) ? statement.other_charges : []) as {
     description: string;
     amount: number;
@@ -70,14 +72,34 @@ export default async function StatementDetailPage({
             <StatementActions
               statementId={id}
               status={statement.status}
+              submitted={!!statement.submitted_at}
+              ownerEmail={statement.owners?.email ?? null}
               canIssue={can(profile.role, "statements.issue")}
+              canApprove={canApprove}
               canDelete={await canDeleteStatements(profile.email)}
             />
           }
         />
         <div className="mb-5">
-          <StatementStatusBadge status={statement.status} />
+          <StatementStatusBadge status={statement.status} submitted={!!statement.submitted_at} />
         </div>
+        {statement.status === "draft" && statement.submitted_at && (
+          <p className="mb-5 rounded-lg border border-[var(--border)] bg-[var(--muted)] p-3 text-sm">
+            {canApprove
+              ? `Waiting for your approval. Check the statement below, then approve it to email it to ${statement.owners?.email ?? "the owner (no email on file)"}.`
+              : `Sent for approval ${formatDateTime(statement.submitted_at)}. The approver emails it to the owner on approving.`}
+          </p>
+        )}
+        {statement.status === "draft" && !statement.submitted_at && statement.return_note && (
+          <p className="mb-5 rounded-lg border border-[var(--border)] bg-[var(--muted)] p-3 text-sm">
+            Sent back by the approver: {statement.return_note}
+          </p>
+        )}
+        {statement.sent_at && (
+          <p className="mb-5 text-sm text-[var(--muted-foreground)]">
+            Approved and sent to {statement.sent_to} on {formatDateTime(statement.sent_at)}.
+          </p>
+        )}
         {otherCharges.length > 0 && (
           <Card className="mb-5">
             <CardHeader className="pb-2">

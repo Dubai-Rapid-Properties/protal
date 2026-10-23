@@ -32,6 +32,7 @@ const schema = z.object({
   emailOwnersAboutBookings: z.literal("on").optional(),
   emailOfficeAboutBookings: z.literal("on").optional(),
   showGuestFirstNameToOwners: z.literal("on").optional(),
+  statementApproverId: z.string().uuid().or(z.literal("")).optional(),
 });
 
 export async function updateCompanySettings(
@@ -72,6 +73,7 @@ export async function updateCompanySettings(
       email_owners_about_bookings: input.emailOwnersAboutBookings === "on",
       email_office_about_bookings: input.emailOfficeAboutBookings === "on",
       show_guest_first_name_to_owners: input.showGuestFirstNameToOwners === "on",
+      statement_approver_id: input.statementApproverId || null,
     })
     .eq("id", true);
 

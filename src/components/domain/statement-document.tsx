@@ -2,15 +2,11 @@ import { formatAED, formatPercent } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
 import type { Tables } from "@/lib/db/database.types";
 import { Logo } from "@/components/layout/logo";
+import { bookingFee, statementSummary } from "@/lib/statements/summary";
 
 type Statement = Tables<"owner_statements">;
 type Line = Tables<"owner_statement_lines">;
 type Company = Tables<"company_settings"> | null;
-
-// How the summary splits the expenses: utility fees as entered (0055) and the
-// utility bills; maintenance and housekeeping. Anything else shows on its own.
-const UTILITIES = new Set(["EXP-OTHER-FEES", "EXP-DEWA", "EXP-CHILLER"]);
-const MAINTENANCE = new Set(["EXP-MAINT", "EXP-HOUSEKEEP"]);
 
 const stayNights = (l: Line) =>
   Math.round((Date.parse(l.check_out ?? "") - Date.parse(l.check_in ?? "")) / 86_400_000);
@@ -51,28 +47,10 @@ export function StatementDocument({
   } | null;
   company: Company;
 }) {
-  const income = lines.filter((l) => l.direction === "income");
-  // Fee lines (fixed-fee agreements; before 0057 the whole fee) go with the
-  // bookings, not the expenses.
-  const feeLines = lines.filter((l) => l.category_code === "EXP-MGMT-FEE");
-  const expenses = lines.filter((l) => l.direction === "expense" && l.category_code !== "EXP-MGMT-FEE");
-
-  const sum = (rows: Line[], pick: (l: Line) => number | null) =>
-    rows.reduce((total, l) => total + Number(pick(l) ?? 0), 0);
-  const utilities = sum(expenses.filter((l) => UTILITIES.has(l.category_code ?? "")), (l) => l.total_aed);
-  const maintenance = sum(expenses.filter((l) => MAINTENANCE.has(l.category_code ?? "")), (l) => l.total_aed);
-  const totalExpenses = sum(expenses, (l) => l.total_aed);
-  const otherExpenses = totalExpenses - utilities - maintenance;
-
-  const grossIncome = Number(statement.gross_income_aed);
-  const totalFee = Number(statement.management_fee_aed) + Number(statement.vat_total_aed);
-  // Statements generated under 0056 took other charges off the payout; show
-  // that so the summary still adds up. From 0057 they never reach the owner.
-  const deducted = Math.round((grossIncome - totalExpenses - totalFee - Number(statement.net_payout_aed)) * 100) / 100;
+  const { income, feeLines, expenses, utilities, maintenance, otherExpenses, totalExpenses, grossIncome, totalFee, deducted } =
+    statementSummary(statement, lines);
   const vatLabel = company?.vat_rate ? formatPercent(company.vat_rate * 100, 0) : "5%";
 
-  const bookingFee = (l: Line) =>
-    l.mgmt_fee_aed == null ? null : Number(l.mgmt_fee_aed) + Number(l.mgmt_fee_vat_aed ?? 0);
   const feeNote = [
     statement.management_fee_pct != null ? `${Number(statement.management_fee_pct)}%` : null,
     Number(statement.vat_total_aed) > 0 ? `VAT ${vatLabel}` : null,

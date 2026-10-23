@@ -193,10 +193,14 @@ const statementStatus: Record<Enums<"statement_status">, Variant> = {
 
 export function StatementStatusBadge({
   status,
+  submitted = false,
 }: {
   status: Enums<"statement_status">;
+  /** A draft sent for approval (0060). */
+  submitted?: boolean;
 }) {
-  return <Badge variant={statementStatus[status]}>{L.STATEMENT_STATUS[status]}</Badge>;
+  if (status === "draft" && submitted) return <Badge variant="warning">Waiting for approval</Badge>;
+  return <Badge variant={statementStatus[status]}>{status === "issued" ? "Sent to owner" : L.STATEMENT_STATUS[status]}</Badge>;
 }
 
 const severityVariant: Record<Enums<"compliance_severity">, Variant> = {

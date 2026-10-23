@@ -19,6 +19,8 @@ export interface OutboundMessage {
   body: string;
   /** Email only: a formatted version of the body; body stays the plain-text part. */
   html?: string;
+  /** Email only: files to attach, e.g. a statement PDF. */
+  attachments?: { filename: string; content: Uint8Array }[];
   templateCode?: string;
   variables?: Record<string, string | number>;
 }
@@ -160,6 +162,14 @@ const emailDriver: MessagingDriver = {
           subject: message.subject ?? "D|R|P Property Management",
           text: message.body,
           ...(message.html ? { html: message.html } : {}),
+          ...(message.attachments?.length
+            ? {
+                attachments: message.attachments.map((f) => ({
+                  filename: f.filename,
+                  content: Buffer.from(f.content).toString("base64"),
+                })),
+              }
+            : {}),
         }),
       });
 
