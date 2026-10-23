@@ -88,7 +88,17 @@ begin
   end if;
   raise notice 'TEST 293 PASS  other fees kept for staff, owner payout untouched';
 
-  delete from owner_statements where id = v_stmt;
+  -- TEST 294 - a unit linked to its owner after the period still counts for occupancy (0058).
+  update owner_statements set status = 'void' where id = v_stmt;
+  update unit_ownerships set start_date = current_date where unit_id = v_unit;
+  v_stmt := generate_owner_statement(v_owner, '2026-06-01', '2026-06-30', 20, true);
+  select * into s from owner_statements where id = v_stmt;
+  if s.occupancy_pct is distinct from 33.3 or s.bookings_count <> 2 then
+    raise exception 'TEST 294 FAILED: %', row_to_json(s);
+  end if;
+  raise notice 'TEST 294 PASS  occupancy counts a unit linked after the period';
+
+  delete from owner_statements where owner_id = v_owner;
   delete from ledger_entries where owner_id = v_owner;
   delete from housekeeping_tasks where unit_id = v_unit;
   delete from availability_blocks where unit_id = v_unit;
