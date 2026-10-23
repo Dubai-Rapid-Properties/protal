@@ -24,23 +24,28 @@ export default async function StaffLayout({
 
   return (
     <div className="flex min-h-dvh flex-col lg:flex-row">
-      <Sidebar
-        sections={STAFF_NAV}
-        role={profile.role}
-        userName={profile.full_name || profile.email || "User"}
-        signOutAction={signOut}
-        badges={{ "/notifications": unread }}
-      />
-      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
+      {/* Printing (a statement, an invoice) prints the page's document only */}
+      <div className="no-print contents">
+        <Sidebar
+          sections={STAFF_NAV}
+          role={profile.role}
+          userName={profile.full_name || profile.email || "User"}
+          signOutAction={signOut}
+          badges={{ "/notifications": unread }}
+        />
+      </div>
+      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8 print:p-0">
         {/* An account with alarms off (0045) gets notifications only */}
         {profile.role === "super_admin" && !profile.alarms_off && <AirbnbBlockAlarmBanner />}
         {(profile.role === "super_admin" || profile.role === "maintenance") && !profile.alarms_off && (
           <StayAlarmBanner />
         )}
-        <NotificationSetup
-          alarms={(profile.role === "super_admin" || profile.role === "maintenance") && !profile.alarms_off}
-        />
-        <HistoryNav />
+        <div className="no-print">
+          <NotificationSetup
+            alarms={(profile.role === "super_admin" || profile.role === "maintenance") && !profile.alarms_off}
+          />
+          <HistoryNav />
+        </div>
         {children}
       </main>
     </div>
