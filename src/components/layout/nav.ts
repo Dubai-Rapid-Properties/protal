@@ -83,6 +83,10 @@ export const STAFF_NAV: NavSection[] = [
     ],
   },
   {
+    label: "Office",
+    items: [{ label: "Refunds", href: "/refunds", icon: "HandCoins", capability: "refunds.view" }],
+  },
+  {
     label: "Administration",
     items: [
       { label: "Company settings", href: "/settings", icon: "Settings", capability: "settings.manage" },
