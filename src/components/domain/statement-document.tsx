@@ -129,7 +129,10 @@ export function StatementDocument({
               </td>
             </tr>
             <tr>
-              <td className="py-1">Less: management fee</td>
+              <td className="py-1">
+                Less: management fee
+                {statement.management_fee_pct != null ? ` (${Number(statement.management_fee_pct)}%)` : ""}
+              </td>
               <td className="py-1 text-right">
                 ({formatAED(statement.management_fee_aed)})
               </td>
@@ -141,6 +144,14 @@ export function StatementDocument({
               </td>
               <td className="py-1 text-right">({formatAED(statement.vat_total_aed)})</td>
             </tr>
+            {Number(statement.other_fees_aed) > 0 && (
+              <tr>
+                <td className="py-1">
+                  Less: other fees{statement.other_fees_note ? ` (${statement.other_fees_note})` : ""}
+                </td>
+                <td className="py-1 text-right">({formatAED(statement.other_fees_aed)})</td>
+              </tr>
+            )}
             <tr className="border-t-2 border-[#0F172A]">
               <td className="pt-2 text-base font-semibold">Net payable to owner</td>
               <td className="pt-2 text-right text-base font-semibold">

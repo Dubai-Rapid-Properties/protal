@@ -13,6 +13,14 @@ const statementSchema = z.object({
   ownerId: z.string().uuid("Select an owner"),
   periodStart: z.string().min(1, "Period start is required"),
   periodEnd: z.string().min(1, "Period end is required"),
+  // Set per statement: the fee differs from owner to owner (0054).
+  feePct: z.coerce
+    .number({ message: "Enter the management fee %" })
+    .min(0, "The management fee cannot be negative")
+    .max(100, "The management fee cannot be over 100%"),
+  feeVat: z.literal("on").optional(),
+  otherFees: z.union([z.literal("").transform(() => 0), z.coerce.number().min(0, "Other fees cannot be negative").max(10_000_000)]).default(0),
+  otherFeesNote: z.string().trim().max(200).optional(),
 });
 
 /**
@@ -50,6 +58,10 @@ export async function generateStatement(
     p_owner_id: input.ownerId,
     p_period_start: input.periodStart,
     p_period_end: input.periodEnd,
+    p_fee_pct: input.feePct,
+    p_fee_vat: input.feeVat === "on",
+    p_other_fees: input.otherFees,
+    p_other_fees_note: input.otherFeesNote || null,
   });
 
   if (error) {
@@ -171,4 +183,30 @@ export async function createLedgerEntry(
 
   revalidatePath("/finance");
   return { success: "Ledger entry posted." };
+}
+
+/** The one account allowed to delete owner statements (0054). */
+const STATEMENT_DELETER = "dulshan@dubairapidproperties.com";
+
+export const canDeleteStatements = async (email: string | null | undefined) =>
+  (email ?? "").trim().toLowerCase() === STATEMENT_DELETER;
+
+/**
+ * Deletes a statement outright, with its lines; the income it carried is
+ * free for a new statement. Only dulshan@dubairapidproperties.com - the
+ * database checks the same.
+ */
+export async function deleteStatement(statementId: string): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!(await canDeleteStatements(profile.email))) {
+    return { error: "Only dulshan@dubairapidproperties.com can delete a statement." };
+  }
+  if (!z.string().uuid().safeParse(statementId).success) return { error: "Statement not found." };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("delete_owner_statement", { p_statement_id: statementId });
+  if (error) return { error: error.message };
+
+  revalidatePath("/finance/statements");
+  redirect("/finance/statements");
 }

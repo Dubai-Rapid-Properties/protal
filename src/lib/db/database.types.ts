@@ -3146,6 +3146,10 @@ export type Database = {
           management_fee_aed: number;
           vat_total_aed: number;
           net_payout_aed: number;
+          management_fee_pct: number | null;
+          fee_vat_applied: boolean | null;
+          other_fees_aed: number;
+          other_fees_note: string | null;
           opening_balance_aed: number;
           closing_balance_aed: number;
           issued_on: string | null;
@@ -3171,6 +3175,10 @@ export type Database = {
           management_fee_aed?: number;
           vat_total_aed?: number;
           net_payout_aed?: number;
+          management_fee_pct?: number | null;
+          fee_vat_applied?: boolean | null;
+          other_fees_aed?: number;
+          other_fees_note?: string | null;
           opening_balance_aed?: number;
           closing_balance_aed?: number;
           issued_on?: string | null;
@@ -3196,6 +3204,10 @@ export type Database = {
           management_fee_aed?: number;
           vat_total_aed?: number;
           net_payout_aed?: number;
+          management_fee_pct?: number | null;
+          fee_vat_applied?: boolean | null;
+          other_fees_aed?: number;
+          other_fees_note?: string | null;
           opening_balance_aed?: number;
           closing_balance_aed?: number;
           issued_on?: string | null;
@@ -5455,7 +5467,15 @@ export type Database = {
         Returns: unknown;
       };
       generate_owner_statement: {
-        Args: Record<string, unknown>;
+        Args: {
+          p_owner_id: string;
+          p_period_start: string;
+          p_period_end: string;
+          p_fee_pct?: number | null;
+          p_fee_vat?: boolean;
+          p_other_fees?: number;
+          p_other_fees_note?: string | null;
+        };
         Returns: unknown;
       };
       ical_export_events: {
@@ -5465,6 +5485,10 @@ export type Database = {
       link_channel_stay: {
         Args: Record<string, unknown>;
         Returns: unknown;
+      };
+      delete_owner_statement: {
+        Args: { p_statement_id: string };
+        Returns: undefined;
       };
       add_ticket_photo: {
         Args: { p_ticket_id: string; p_path: string };

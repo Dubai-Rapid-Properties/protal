@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { FileText } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { requireCapability } from "@/lib/auth/session";
+import { getCompanySettings, requireCapability } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
 import { PageHeader, EmptyState, Money } from "@/components/domain/shared";
 import { StatementStatusBadge } from "@/components/domain/status-badge";
@@ -23,13 +23,14 @@ export const metadata = { title: "Owner statements" };
 export default async function StatementsPage() {
   const supabase = await createClient();
 
-  const [profile, statementsResult, ownersResult] = await Promise.all([
+  const [profile, statementsResult, ownersResult, settings] = await Promise.all([
     requireCapability("statements.view"),
     supabase
       .from("owner_statements")
       .select("*, owners(id, full_name)")
       .order("period_start", { ascending: false }),
     supabase.from("owners").select("id, full_name").eq("is_active", true).order("full_name"),
+    getCompanySettings(),
   ]);
 
   const statements = statementsResult.data ?? [];
@@ -45,6 +46,7 @@ export default async function StatementsPage() {
     "Expenses (AED)": s.total_expenses_aed,
     "Management fee (AED)": s.management_fee_aed,
     "VAT (AED)": s.vat_total_aed,
+    "Other fees (AED)": s.other_fees_aed,
     "Net payout (AED)": s.net_payout_aed,
     Status: s.status,
   }));
@@ -59,7 +61,7 @@ export default async function StatementsPage() {
           <>
             <ExportButton rows={exportRows} filename="drp-owner-statements" />
             {can(profile.role, "statements.issue") && (
-              <GenerateStatementDialog owners={owners} />
+              <GenerateStatementDialog owners={owners} vatRate={settings?.vat_rate} />
             )}
           </>
         }
@@ -72,7 +74,7 @@ export default async function StatementsPage() {
           icon={<FileText className="size-8" />}
           action={
             can(profile.role, "statements.issue") ? (
-              <GenerateStatementDialog owners={owners} />
+              <GenerateStatementDialog owners={owners} vatRate={settings?.vat_rate} />
             ) : undefined
           }
         />
