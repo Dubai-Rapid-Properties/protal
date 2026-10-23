@@ -9,7 +9,8 @@ import { can } from "@/lib/auth/rbac";
 import { TICKET_CATEGORIES } from "@/lib/labels";
 import type { Enums } from "@/lib/db/database.types";
 
-export type ActionState = { error?: string; success?: string };
+/** `id`: the ticket createTicket made; the form then sends its photos and opens it. */
+export type ActionState = { error?: string; success?: string; id?: string };
 
 const NOT_CHANGED = "This ticket could not be changed. It may be outside the properties assigned to you.";
 
@@ -74,7 +75,7 @@ export async function createTicket(_prev: ActionState, formData: FormData): Prom
   if (error) return { error: explain(error) };
 
   revalidatePath("/maintenance");
-  redirect(`/maintenance/${data.id}`);
+  return { id: data.id };
 }
 
 const statusSchema = z.object({

@@ -9,6 +9,8 @@ import { MaintenanceStatusBadge, PriorityBadge } from "@/components/domain/statu
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TicketNotes } from "@/components/domain/ticket-notes";
+import { TicketPhotos } from "@/components/domain/ticket-photos";
+import { ticketPhotoUrls } from "@/lib/tickets/photo-urls";
 import { formatDate } from "@/lib/dates";
 import { MAINTENANCE_CATEGORY, TICKET_KIND } from "@/lib/labels";
 import { toTicketNotes } from "@/lib/tickets/notes";
@@ -146,6 +148,20 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
                   <p className="mt-1 whitespace-pre-line text-sm">{t.resolution_notes}</p>
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Photos</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <TicketPhotos
+                ticketId={t.id}
+                photos={await ticketPhotoUrls(t.photo_paths)}
+                canAdd={can(profile.role, "maintenance.raise")}
+                canRemove={profile.role === "super_admin"}
+              />
             </CardContent>
           </Card>
 
