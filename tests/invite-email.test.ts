@@ -39,9 +39,9 @@ test("missing company details leave no empty lines behind", () => {
 });
 
 test("link mode: the link opens the portal, with no password or sign-in details", () => {
-  const { text, html } = buildPortalInvite({ ...base, mode: "link", linkValidHours: 24 });
+  const { text, html } = buildPortalInvite({ ...base, mode: "link", linkValidHours: 168 });
   assert.match(text, /Open your owner portal here:\nhttps:\/\/owner\.drp\.test\/auth\/confirm/);
-  assert.match(text, /expires after 24 hours\. Whenever you need to open the portal again, just ask us for a new link\./);
+  assert.match(text, /works for 7 days\. Whenever you need to open the portal after that, just ask us for a new link\./);
   assert.doesNotMatch(text, /password|Email: tara@example\.com/i);
   assert.match(html, />Open my portal</);
   assert.doesNotMatch(html, /Set my password|Signing in later/);

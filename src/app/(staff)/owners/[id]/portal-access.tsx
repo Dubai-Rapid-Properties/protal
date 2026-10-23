@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/dates";
+import { validityLabel } from "@/lib/auth/link-validity";
 import {
   emailPortalInvite,
   grantPortalAccess,
@@ -197,8 +198,8 @@ export function PortalAccess({
               </Button>
             </div>
             <p className="text-xs text-[var(--muted-foreground)]">
-              The link works once and expires after {state.linkValidHours ?? 24} hours (Supabase,
-              Authentication, Email OTP expiration). If it expires, create a new one here.
+              The link works for {validityLabel(state.linkValidHours ?? 168)}, as often as the
+              owner opens it, until they choose a password. A new link replaces this one.
             </p>
           </div>
         )}

@@ -8,6 +8,7 @@ import { can, isStaff } from "@/lib/auth/rbac";
 import { env } from "@/lib/env";
 import { sendMessage, toE164 } from "@/lib/messaging";
 import { buildPortalInvite } from "@/lib/notify/invite-email";
+import { newInviteToken } from "@/lib/auth/owner-invite";
 
 export type PortalAccessState = {
   error?: string;
@@ -146,12 +147,26 @@ export async function grantPortalAccess(
     );
   if (linkError) return { error: `Could not link the login: ${linkError.message}` };
 
-  // Opening the link shows a Continue button; the token is only spent on that
-  // click, so a WhatsApp or email link preview cannot use it up.
-  const link = `${env.ownerUrl}/auth/confirm?${new URLSearchParams({
-    token_hash: result.data.properties.hashed_token,
-    type: linkType,
-  })}`;
+  // The link carries the portal's own token (0050), not Supabase's one-time
+  // one: it signs the owner in as often as it is opened until it expires or
+  // they choose a password, and Continue makes a fresh Supabase sign-in each
+  // time. A new link replaces the owner's earlier ones.
+  const { token, hash } = newInviteToken();
+  await admin.from("owner_invites").delete().eq("profile_id", userId);
+  const { error: inviteError } = await admin.from("owner_invites").insert({
+    token_hash: hash,
+    profile_id: userId,
+    email,
+    created_by: profile.id,
+    expires_at: new Date(Date.now() + env.ownerLinkValidHours * 3_600_000).toISOString(),
+  });
+  // Until migration 0050 is in, fall back to Supabase's own one-time link.
+  if (inviteError) console.error(`[owners] portal link fell back to a one-time link: ${inviteError.message}`);
+  const link = `${env.ownerUrl}/auth/confirm?${new URLSearchParams(
+    inviteError
+      ? { token_hash: result.data.properties.hashed_token, type: linkType }
+      : { invite: token, type: linkType }
+  )}`;
 
   const invite = buildPortalInvite({
     ownerName: owner.full_name,
