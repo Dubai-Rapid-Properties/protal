@@ -5473,8 +5473,7 @@ export type Database = {
           p_period_end: string;
           p_fee_pct?: number | null;
           p_fee_vat?: boolean;
-          p_other_fees?: number;
-          p_other_fees_note?: string | null;
+          p_other_items?: Json;
         };
         Returns: unknown;
       };
