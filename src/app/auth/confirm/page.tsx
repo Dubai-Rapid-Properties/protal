@@ -15,10 +15,10 @@ export const metadata = { title: "Set up your login" };
 export default async function ConfirmPage({
   searchParams,
 }: {
-  searchParams: Promise<{ token_hash?: string; type?: string; error?: string }>;
+  searchParams: Promise<{ token_hash?: string; invite?: string; type?: string; error?: string }>;
 }) {
-  const { token_hash: tokenHash, type, error } = await searchParams;
-  const valid = !error && Boolean(tokenHash) && (type === "invite" || type === "recovery");
+  const { token_hash: tokenHash, invite, type, error } = await searchParams;
+  const valid = !error && Boolean(tokenHash || invite) && (type === "invite" || type === "recovery");
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-[var(--muted)] p-4">
@@ -48,19 +48,36 @@ export default async function ConfirmPage({
                   </p>
                 </div>
                 <form action={confirmLink}>
-                  <input type="hidden" name="token_hash" value={tokenHash} />
+                  {invite ? (
+                    <input type="hidden" name="invite" value={invite} />
+                  ) : (
+                    <input type="hidden" name="token_hash" value={tokenHash} />
+                  )}
                   <input type="hidden" name="type" value={type} />
                   <Button type="submit" className="w-full">
                     Continue
                   </Button>
                 </form>
               </>
+            ) : error === "link_used" ? (
+              <>
+                <h1 className="text-lg font-semibold">Your password is already set</h1>
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  Sign in with your email address and password. Forgot it? Ask D|R|P for a
+                  new link.
+                </p>
+                <Button asChild className="w-full">
+                  <Link href="/login">Go to sign in</Link>
+                </Button>
+              </>
             ) : error ? (
               <>
-                <h1 className="text-lg font-semibold">This link has expired</h1>
+                <h1 className="text-lg font-semibold">
+                  {error === "link_expired" ? "This link has expired" : "This link no longer works"}
+                </h1>
                 <p className="text-sm text-[var(--muted-foreground)]">
-                  Sign-in links work once and only for a limited time. Ask D|R|P to send
-                  you a new one.
+                  Sign-in links work only for a limited time, and a newer link replaces an
+                  older one. Ask D|R|P to send you a new one.
                 </p>
                 <Button asChild variant="outline" className="w-full">
                   <Link href="/login">Go to sign in</Link>

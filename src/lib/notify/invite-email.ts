@@ -3,6 +3,7 @@
  * WhatsApp and the office's own mail app, and a branded HTML version for
  * when the portal sends the email itself.
  */
+import { validityLabel } from "@/lib/auth/link-validity";
 
 export interface InviteCompany {
   trade_name?: string | null;
@@ -56,7 +57,7 @@ function signature(company: InviteCompany | null | undefined): string[] {
 export function buildPortalInvite(input: InviteInput): InviteMessage {
   const { ownerName, email, link, portalUrl, company, linkValidHours = 1, mode = "password" } = input;
   const direct = mode === "link";
-  const validity = `${linkValidHours} ${linkValidHours === 1 ? "hour" : "hours"}`;
+  const validity = validityLabel(linkValidHours);
   const portalHost = portalUrl.replace(/^https?:\/\//, "");
   const subject = "Your D|R|P owner portal is ready";
 
@@ -70,14 +71,14 @@ export function buildPortalInvite(input: InviteInput): InviteMessage {
           "Open your owner portal here:",
           link,
           "",
-          `This link works once and expires after ${validity}. Whenever you need to open the portal again, just ask us for a new link.`,
+          `This link works for ${validity}. Whenever you need to open the portal after that, just ask us for a new link.`,
           "",
         ]
       : [
           "To get started, set your password here:",
           link,
           "",
-          `This link works once and expires after ${validity}. If it has expired, just ask us for a new one.`,
+          `This link works for ${validity}. If it has expired, just ask us for a new one.`,
           "",
           "After that, sign in any time at:",
           portalUrl,
@@ -119,7 +120,7 @@ export function buildPortalInvite(input: InviteInput): InviteMessage {
     <a href="${escape(link)}" style="display:inline-block;background:${GOLD};color:${NAVY};text-decoration:none;font-size:16px;font-weight:600;padding:14px 32px;border-radius:8px;">${direct ? "Open my portal" : "Set my password"}</a>
   </td></tr>
   <tr><td align="center" style="padding:0 36px 28px;">
-    <p style="margin:0;font-size:12px;line-height:1.5;color:${MUTED};">This link works once and expires after ${validity}.<br>${direct ? "Ask us for a new link whenever you need one." : "If it has expired, just ask us for a new one."}</p>
+    <p style="margin:0;font-size:12px;line-height:1.5;color:${MUTED};">This link works for ${validity}.<br>${direct ? "Ask us for a new link whenever you need one." : "If it has expired, just ask us for a new one."}</p>
   </td></tr>
   <tr><td style="padding:0 36px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e5e7eb;">

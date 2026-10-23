@@ -3234,6 +3234,39 @@ export type Database = {
           },
         ];
       };
+      owner_invites: {
+        Row: {
+          id: string;
+          token_hash: string;
+          profile_id: string;
+          email: string;
+          created_by: string | null;
+          created_at: string;
+          expires_at: string;
+          used_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          token_hash: string;
+          profile_id: string;
+          email: string;
+          created_by?: string | null;
+          created_at?: string;
+          expires_at: string;
+          used_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          token_hash?: string;
+          profile_id?: string;
+          email?: string;
+          created_by?: string | null;
+          created_at?: string;
+          expires_at?: string;
+          used_at?: string | null;
+        };
+        Relationships: [];
+      };
       owner_users: {
         Row: {
           owner_id: string;

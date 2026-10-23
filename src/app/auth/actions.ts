@@ -2,7 +2,8 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
+import { checkInvite, hashInviteToken, isInviteToken } from "@/lib/auth/owner-invite";
 import { getProfile } from "@/lib/auth/session";
 import { portalHome, roleAllowedOnPortal } from "@/lib/portal";
 import { currentPortal, WRONG_PORTAL_PATH } from "@/lib/portal-server";
@@ -11,15 +12,54 @@ import { env } from "@/lib/env";
 const LINK_TYPES = new Set(["invite", "recovery"]);
 
 /**
- * Spends a one-time sign-in link and opens a session. Runs only when the owner
- * presses Continue - never on a plain GET - so a link preview in WhatsApp or a
- * mail scanner cannot use the token up before the owner does.
+ * Opens a session from a sign-in link. Runs only when the owner presses
+ * Continue - never on a plain GET - so a link preview in WhatsApp or a mail
+ * scanner cannot use it up before the owner does.
+ *
+ * A link the portal issued (?invite=, 0050) makes a fresh Supabase sign-in on
+ * the spot, so it works each time it is opened until it expires or the owner
+ * has chosen a password. Links sent before then carry Supabase's own one-time
+ * token (?token_hash=) and still work once.
  */
 export async function confirmLink(formData: FormData) {
-  const tokenHash = String(formData.get("token_hash") ?? "");
-  const type = String(formData.get("type") ?? "");
+  const invite = String(formData.get("invite") ?? "");
+  let tokenHash = String(formData.get("token_hash") ?? "");
+  let type = String(formData.get("type") ?? "");
   // Errors stay on /auth/confirm: /login forwards anyone already signed in
   // to their portal, which would hide the message.
+  if (invite) {
+    if (!isInviteToken(invite)) redirect("/auth/confirm?error=link_invalid");
+    const admin = createAdminClient();
+    const { data: row } = await admin
+      .from("owner_invites")
+      .select("id, profile_id, email, created_at, expires_at, used_at")
+      .eq("token_hash", hashInviteToken(invite))
+      .maybeSingle();
+    if (!row) redirect("/auth/confirm?error=link_invalid");
+    const { data: owner } = await admin
+      .from("profiles")
+      .select("last_login_at, is_active")
+      .eq("id", row.profile_id)
+      .maybeSingle();
+    if (!owner?.is_active) redirect("/auth/confirm?error=link_invalid");
+    const state = checkInvite(row, owner.last_login_at, env.ownerPasswords);
+    if (state !== "ok") redirect(`/auth/confirm?error=link_${state}`);
+
+    // A fresh one-time token, spent straight away below.
+    const { data: link, error: linkError } = await admin.auth.admin.generateLink({
+      type: "recovery",
+      email: row.email,
+    });
+    if (linkError || !link.properties?.hashed_token) {
+      console.error(`[auth] invite sign-in failed: ${linkError?.code ?? "unknown"} ${linkError?.message ?? ""}`);
+      redirect("/auth/confirm?error=link_invalid");
+    }
+    tokenHash = link.properties.hashed_token;
+    type = "recovery";
+    if (!row.used_at) {
+      await admin.from("owner_invites").update({ used_at: new Date().toISOString() }).eq("id", row.id);
+    }
+  }
   if (!tokenHash || !LINK_TYPES.has(type)) redirect("/auth/confirm?error=link_invalid");
 
   const supabase = await createClient();

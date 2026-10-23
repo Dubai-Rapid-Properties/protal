@@ -47,10 +47,10 @@ export const env = {
   // one to use the portal. On: OWNER_PASSWORDS=on in wrangler.jsonc.
   ownerPasswords: optional("OWNER_PASSWORDS") === "on",
 
-  // How long an owner's sign-in link works, in hours. It must match Supabase
-  // -> Authentication -> Email -> "Email OTP Expiration" (86400 seconds = 24
-  // hours, the longest it allows); invites and the owner page say this many.
-  ownerLinkValidHours: Number(optional("OWNER_LINK_VALID_HOURS") ?? 24),
+  // How long an owner's sign-in link works, in hours (the portal's own link,
+  // 0050; until then it can be opened any number of times). Invites and the
+  // owner page say this many.
+  ownerLinkValidHours: Number(optional("OWNER_LINK_VALID_HOURS") ?? 168),
 
   // Shared secret for the scheduled endpoints (/api/cron/*). The scheduler
   // (Supabase pg_cron) sends it as "Authorization: Bearer <secret>".
