@@ -32,8 +32,11 @@ function Submit() {
 
 export function GenerateStatementDialog({
   owners,
+  vatRate,
 }: {
   owners: { id: string; full_name: string }[];
+  /** company_settings.vat_rate, e.g. 0.05 */
+  vatRate?: number | null;
 }) {
   const [open, setOpen] = React.useState(false);
   const [state, action] = useActionState<ActionState, FormData>(generateStatement, {});
@@ -61,8 +64,8 @@ export function GenerateStatementDialog({
             <DialogTitle>Generate an owner statement</DialogTitle>
             <DialogDescription>
               Collected income and owner-borne expenses for the period are pulled from
-              the ledger, the management fee is applied from the active agreement, and
-              VAT is added to the fee where it applies.
+              the ledger. The management fee is the % you set here, of that income;
+              other fees are taken off as entered.
             </DialogDescription>
           </DialogHeader>
 
@@ -104,9 +107,50 @@ export function GenerateStatementDialog({
               </div>
             </div>
 
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="feePct">Management fee (%)</Label>
+                <Input
+                  id="feePct"
+                  name="feePct"
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  required
+                  placeholder="e.g. 20"
+                />
+              </div>
+              <label className="flex items-center gap-2 self-end pb-2 text-sm">
+                <input type="checkbox" name="feeVat" defaultChecked className="size-4" />
+                Add VAT{vatRate ? ` (${Math.round(vatRate * 100)}%)` : ""} to the fee
+              </label>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="otherFees">Other fees (AED)</Label>
+                <Input
+                  id="otherFees"
+                  name="otherFees"
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step="0.01"
+                  placeholder="0.00"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="otherFeesNote">Other fees are for</Label>
+                <Input id="otherFeesNote" name="otherFeesNote" maxLength={200} placeholder="e.g. Key cutting, DEWA top-up" />
+              </div>
+            </div>
+
             <p className="text-xs text-[var(--muted-foreground)]">
-              Ledger lines already carried on another statement are skipped, so the
-              same income can never be paid out twice.
+              Net payout = income − expenses − management fee − VAT on the fee − other fees.
+              Ledger lines already carried on another statement are skipped, so the same
+              income can never be paid out twice.
             </p>
           </div>
 
