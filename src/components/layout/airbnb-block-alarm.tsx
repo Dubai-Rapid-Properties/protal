@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { BellRing, Check, Volume2, VolumeX } from "lucide-react";
 import { toast } from "sonner";
+import { noteIfStale, portalIsStale } from "@/lib/stale-client";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/dates";
 import { getAirbnbBlockAlarms, markAirbnbBlocked, type AirbnbBlockAlarm } from "@/app/(staff)/alarm-actions";
@@ -24,10 +25,13 @@ export function AirbnbBlockAlarmBanner() {
   const [busy, setBusy] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
+    if (portalIsStale()) return;
     try {
       setAlarms(await getAirbnbBlockAlarms());
-    } catch {
-      // Keep the last list; the next poll tries again.
+    } catch (err) {
+      // Keep the last list; the next poll tries again. A tab left open across a deploy stops
+      // asking and says the portal was updated (stale-client.ts).
+      noteIfStale(err);
     }
   }, []);
 
@@ -48,7 +52,12 @@ export function AirbnbBlockAlarmBanner() {
 
   async function done(a: AirbnbBlockAlarm) {
     setBusy(a.bookingId);
-    const result = await markAirbnbBlocked(a.bookingId);
+    let result: { error?: string };
+    try {
+      result = await markAirbnbBlocked(a.bookingId);
+    } catch (err) {
+      result = { error: noteIfStale(err) ? "The portal was updated: reload this page, then try again." : "Could not reach the portal. Try again." };
+    }
     setBusy(null);
     if (result.error) toast.error(result.error);
     else {
