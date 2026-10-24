@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
-import { requireProfile } from "@/lib/auth/session";
+import { getProfile, requireProfile } from "@/lib/auth/session";
 
 export interface AirbnbBlockAlarm {
   bookingId: string;
@@ -20,8 +20,11 @@ export interface AirbnbBlockAlarm {
  * Super admins only; everyone else gets an empty list.
  */
 export async function getAirbnbBlockAlarms(): Promise<AirbnbBlockAlarm[]> {
-  const profile = await requireProfile();
-  if (profile.role !== "super_admin") return [];
+  // A background poll: it must never redirect. A server action that redirects takes the page it
+  // was called from to the sign-in screen, so a session that has lapsed, or a database that is
+  // slow for a moment, would move someone off the page they are working on.
+  const profile = await getProfile();
+  if (!profile?.is_active || profile.role !== "super_admin") return [];
   const supabase = await createClient();
   const { data } = await supabase.rpc("pending_airbnb_blocks");
   // The generated types leave function results untyped; this is its row.
@@ -80,8 +83,9 @@ const STAY_ALARM_ROLES = new Set(["super_admin", "maintenance"]);
  * everyone else gets an empty list.
  */
 export async function getStayAlarms(): Promise<StayAlarm[]> {
-  const profile = await requireProfile();
-  if (!STAY_ALARM_ROLES.has(profile.role)) return [];
+  // A background poll: it must never redirect (see getAirbnbBlockAlarms).
+  const profile = await getProfile();
+  if (!profile?.is_active || !STAY_ALARM_ROLES.has(profile.role)) return [];
   const supabase = await createClient();
   const { data } = await supabase.rpc("due_stay_alarms");
   // The generated types leave function results untyped; this is its row.

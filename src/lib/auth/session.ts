@@ -7,8 +7,21 @@ import type { Tables } from "@/lib/db/database.types";
 import { can, homePathForRole, type Capability, type Role } from "./rbac";
 import { roleAllowedOnPortal, type Portal } from "@/lib/portal";
 import { currentPortal, WRONG_PORTAL_PATH } from "@/lib/portal-server";
+import { isAuthFailure } from "./errors";
 
 export type Profile = Tables<"profiles">;
+
+/**
+ * The session may well be valid, but the database did not answer (a network blip, a timeout, a 5xx).
+ * This is thrown rather than answered with "no profile", which would send the person to the sign-in
+ * screen: being signed out is for sessions the database has refused, not for a slow moment.
+ */
+export class ProfileUnavailableError extends Error {
+  constructor(message: string) {
+    super(`Could not look up the signed-in profile: ${message}`);
+    this.name = "ProfileUnavailableError";
+  }
+}
 
 /**
  * Set once if current_profile() turns out not to exist, so a database that has
@@ -42,7 +55,13 @@ export const getProfile = cache(async (): Promise<Profile | null> => {
   // inside it is as trustworthy as it is in any RLS policy - and the middleware
   // has already refreshed the session for this request.
   if (!currentProfileRpcMissing) {
-    const { data, error } = await supabase.rpc("current_profile");
+    let result = await supabase.rpc("current_profile");
+    // One more try for a lookup that was not answered, before deciding anything.
+    if (result.error && result.error.code !== "PGRST202" && !isAuthFailure(result.error, result.status)) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      result = await supabase.rpc("current_profile");
+    }
+    const { data, error } = result;
 
     if (!error) {
       // A composite-returning RPC yields the row itself, or null when the
@@ -51,9 +70,15 @@ export const getProfile = cache(async (): Promise<Profile | null> => {
       return profile && profile.id ? profile : null;
     }
 
+    // The token was refused (missing, invalid or expired): this session is over.
+    if (isAuthFailure(error, result.status)) return null;
+
     // PGRST202 = the function is not in the schema cache, i.e. migration 0013
-    // has not been applied. Anything else is a genuine failure worth surfacing.
-    if (error.code !== "PGRST202") return null;
+    // has not been applied. Anything else is a failure to be answered, not a sign-out.
+    if (error.code !== "PGRST202") {
+      console.error(`[auth] current_profile failed (${result.status}): ${error.code} ${error.message}`);
+      throw new ProfileUnavailableError(error.message);
+    }
 
     currentProfileRpcMissing = true;
     console.warn(

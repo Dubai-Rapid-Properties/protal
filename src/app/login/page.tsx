@@ -40,7 +40,8 @@ export default async function LoginPage({
 
   if (!isConfigured && portal === "admin") redirect("/setup");
 
-  const profile = await getProfile();
+  // If the database cannot answer, show the form: signing in is what is needed then anyway.
+  const profile = await getProfile().catch(() => null);
   if (profile) {
     redirect(roleAllowedOnPortal(profile.role, portal) ? portalHome(portal) : WRONG_PORTAL_PATH);
   }
