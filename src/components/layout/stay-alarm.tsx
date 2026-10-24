@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { BedDouble, BellRing, Check, DoorClosed, DoorOpen } from "lucide-react";
 import { toast } from "sonner";
+import { noteIfStale, portalIsStale } from "@/lib/stale-client";
 import { Button } from "@/components/ui/button";
 import { ackStayAlarm, getStayAlarms, type StayAlarm } from "@/app/(staff)/alarm-actions";
 import { useAlarmSound } from "./alarm-sound";
@@ -29,10 +30,13 @@ export function StayAlarmBanner() {
   const [busy, setBusy] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
+    if (portalIsStale()) return;
     try {
       setAlarms(await getStayAlarms());
-    } catch {
-      // Keep the last list; the next poll tries again.
+    } catch (err) {
+      // Keep the last list; the next poll tries again. A tab left open across a deploy stops
+      // asking and says the portal was updated (stale-client.ts).
+      noteIfStale(err);
     }
   }, []);
 
@@ -53,7 +57,12 @@ export function StayAlarmBanner() {
 
   async function done(a: StayAlarm) {
     setBusy(key(a));
-    const result = await ackStayAlarm(a);
+    let result: { error?: string };
+    try {
+      result = await ackStayAlarm(a);
+    } catch (err) {
+      result = { error: noteIfStale(err) ? "The portal was updated: reload this page, then press Done." : "Could not reach the portal. Try again." };
+    }
     setBusy(null);
     if (result.error) toast.error(result.error);
     else setAlarms((list) => list.filter((x) => key(x) !== key(a)));
