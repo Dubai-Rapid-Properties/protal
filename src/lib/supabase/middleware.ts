@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/lib/db/database.types";
+import { isTransientFailure } from "@/lib/auth/errors";
 
 /** Refresh this many seconds before the access token actually expires. */
 const REFRESH_MARGIN_SECONDS = 120;
@@ -114,11 +115,23 @@ export async function updateSession(request: NextRequest) {
     // whether to send the visitor to /login - it is never an authorisation
     // decision, because PostgREST verifies the JWT on every query and RLS
     // decides the row set.
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    let { data: { session }, error } = await supabase.auth.getSession();
+
+    // The refresh did not get an answer (a network blip, a 5xx): try once more before concluding
+    // anything. The session is not dropped for this kind of failure, only for a refused token.
+    if (!session && isTransientFailure(error)) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      ({ data: { session }, error } = await supabase.auth.getSession());
+    }
 
     if (!session && !isPublic) {
+      if (isTransientFailure(error)) {
+        // Still no answer, and nothing says the session is over: carry on rather than sign out.
+        // The cookie stays, so the next request refreshes it.
+        console.warn(`[auth] session refresh not answered, request let through: ${error?.message}`);
+        return response;
+      }
+      console.warn(`[auth] no valid session, sent to sign-in: ${error?.message ?? "no session cookie"}`);
       const redirect = request.nextUrl.clone();
       redirect.pathname = "/login";
       redirect.searchParams.set("next", path);
