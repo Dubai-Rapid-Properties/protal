@@ -81,6 +81,10 @@ export function AirbnbExtensionSetup({ fallback }: { fallback: React.ReactNode }
           <CheckCircle2 className="size-4 text-[var(--success)]" />
           The D|R|P extension is installed on this browser (version {installed}).
         </p>
+        <p className="text-sm text-[var(--muted-foreground)]">
+          From version 1.1 it also saves a listing&apos;s prices on its unit by itself, whenever the listing&apos;s
+          Pricing or Calendar page is open on Airbnb.
+        </p>
         {old && (
           <Callout title={`Version ${LATEST_EXTENSION} is out`}>
             <p className="mb-2">

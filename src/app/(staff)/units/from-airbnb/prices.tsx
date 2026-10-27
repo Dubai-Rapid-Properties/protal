@@ -50,9 +50,10 @@ export function PricesReview({
 
   return (
     <div className="space-y-5">
-      <Callout tone="info" title="A one-click refresh, not a live sync">
-        These are the prices on the Airbnb page right now. Changes on Airbnb - including Smart Pricing - are not
-        followed: click the button on Airbnb again when prices change.
+      <Callout tone="info" title="The prices on the Airbnb page right now">
+        With the D|R|P extension (version 1.1 or later) these are saved on their own whenever the listing&apos;s
+        Pricing or Calendar page is open on Airbnb. Smart Pricing changes Airbnb makes by itself only arrive when
+        that page is opened.
       </Callout>
       {foreign ? (
         <Callout tone="danger" title={`The page shows prices in ${prices.currency === "mixed" ? "several currencies" : prices.currency}`}>

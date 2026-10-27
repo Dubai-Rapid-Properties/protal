@@ -4,8 +4,10 @@
  * the pricing settings (Listings → the listing → Pricing) and, where the page
  * labels its days, the host calendar's per-night prices.
  *
- * A one-off reading, not a sync: Smart Pricing changes on Airbnb are not
- * followed. Every value may be missing and staff confirm each before saving.
+ * Each reading is of the page as it is: Airbnb is never asked by the portal.
+ * On the import page staff confirm each value before saving; the extension's
+ * automatic sync saves them under stricter rules (see price-sync.ts). Every
+ * value may be missing.
  */
 import { amountIn, parseDateText } from "@/lib/airbnb/reservation-page";
 import type { ListingPrices } from "@/lib/ical/listings";

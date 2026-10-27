@@ -59,8 +59,14 @@ Seasonal rates: clicked on the listing's host **Calendar**, the button reads day
 and replace the website's seasons only if staff leave that ticked. Whether Airbnb's calendar labels its days
 this way has not been confirmed on a live page; when it does not, no seasons are offered.
 
-This is a **one-click refresh, not a live sync**: Airbnb price changes, Smart Pricing included, are not
-followed. Click the button again when prices change.
+**Automatic sync (extension 1.1+).** While a listing's Pricing or Calendar page is open on Airbnb, the
+extension reads it each time its prices change on screen and posts it to `POST /units/from-airbnb/sync`
+(as the signed-in staff member, `units.manage`). The unit whose Airbnb calendar address carries the
+listing's number takes the shown rates at once (`src/lib/airbnb/price-sync.ts`): AED only, a value
+missing from the page never clears the unit's, a nightly rate of 0 is ignored, and calendar nights
+replace the website's seasons only for the dates they cover (nights at the nightly or Fri/Sat weekend
+rate need no row). A note on Airbnb says what changed; the button's menu turns the sync off per browser.
+Airbnb is never asked by the portal, so Smart Pricing changes arrive only when that page is opened.
 
 ## API (service-to-service)
 | Endpoint | Auth | Purpose |
