@@ -93,3 +93,29 @@ test("collects calendar days without running the day and price together", () => 
     { date: "2026-11-12", price: 415 },
   ]);
 });
+
+test("dirhams however the page writes them", () => {
+  const read = (text: string) => parseAirbnbPrices({ u: CALENDAR, text }, TODAY);
+  // Presentation-form letters, an Arabic full stop, the letters reversed, the dirham sign.
+  for (const aed of ["ﺩ.ﺇ", "د۔إ", "إ.د", "⃃", "د.ا"]) {
+    const p = read(`229 ${aed} per night\n234 ${aed} weekend price`);
+    assert.deepEqual([p.currency, p.nightly, p.weekend], ["AED", 229, 234], aed);
+  }
+  assert.deepEqual(nightFromLabel("2026-11-12 12 415⃃", TODAY), { date: "2026-11-12", price: 415, currency: "AED" });
+});
+
+test("amounts without a currency take the one on the page's currency button", () => {
+  const p = parseAirbnbPrices({ u: CALENDAR, text: "Pricing\n229 per night\n234 weekend price\nToday\nAED" }, TODAY);
+  assert.deepEqual([p.currency, p.nightly, p.weekend], ["AED", 229, 234]);
+  assert.equal(parseAirbnbPrices({ u: CALENDAR, text: "229 per night" }, TODAY).currency, null);
+});
+
+test("the price sync gets the whole page; the address hand-over is trimmed", () => {
+  // A big calendar first, its side panel last.
+  const days = Array.from({ length: 3000 }, (_, i) => `${(i % 30) + 1}\n415د.إ`).join("\n");
+  const text = `${days}\n${PANEL}`;
+  const posted = collectAirbnbListing(fakeDoc([], text), CALENDAR, true, false);
+  assert.equal(parseAirbnbPrices(posted, TODAY).nightly, 229);
+  const handed = collectAirbnbListing(fakeDoc([], text), CALENDAR, true);
+  assert.ok(handed.text.length < posted.text.length);
+});

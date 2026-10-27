@@ -20,11 +20,11 @@ import type { TablesUpdate } from "@/lib/db/database.types";
  * and the units.manage capability apply as on the import page. Only the
  * extension calls it: a JSON body and an extension (or this portal's) origin.
  */
-const MAX_BODY = 200_000;
+const MAX_BODY = 500_000;
 
 export type SyncAnswer =
-  | { status: "saved"; unit: string; changes: string[] }
-  | { status: "unchanged"; unit: string }
+  | { status: "saved"; unit: string; changes: string[]; nights: number }
+  | { status: "unchanged"; unit: string; nights: number }
   | { status: "skipped" | "signin" | "error"; message: string };
 
 const answer = (body: SyncAnswer, status = 200) =>
@@ -38,6 +38,19 @@ function fromExtension(request: Request): boolean {
 }
 
 const num = (v: unknown) => (v == null || v === "" ? null : Number(v));
+
+/** The page's nightly price line, any character beyond plain English spelled out ("229 [U+062F] per night"). */
+function priceLineOf(sent: unknown): string {
+  const text = sent && typeof sent === "object" ? (sent as { text?: unknown }).text : null;
+  if (typeof text !== "string") return "";
+  const line = text.split("\n").find((l) => /\d/.test(l) && /night|price/i.test(l));
+  return line
+    ? `"${line
+        .trim()
+        .slice(0, 60)
+        .replace(/[^\x20-\x7e]/g, (c) => `[U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}]`)}"`
+    : "";
+}
 
 export async function POST(request: Request) {
   if (!fromExtension(request) || !request.headers.get("content-type")?.startsWith("application/json")) {
@@ -90,8 +103,9 @@ export async function POST(request: Request) {
   const u = units[0];
   const label = [u.properties?.name, u.unit_number].filter(Boolean).join(" · ");
 
+  const prices = parseAirbnbPrices(sent, today);
   const plan = planPriceSync(
-    parseAirbnbPrices(sent, today),
+    prices,
     {
       nightly: num(u.base_nightly_rate_aed),
       weekend: num(u.weekend_rate_aed),
@@ -102,8 +116,14 @@ export async function POST(request: Request) {
     },
     today
   );
-  if ("skip" in plan) return answer({ status: "skipped", message: plan.skip });
-  if (!plan.changes.length) return answer({ status: "unchanged", unit: label });
+  if ("skip" in plan) {
+    // Say what the page showed, so a currency written some new way can be added.
+    const sample = prices.currency ? "" : priceLineOf(sent);
+    return answer({ status: "skipped", message: plan.skip + (sample ? ` The page showed: ${sample}` : "") });
+  }
+  // How many calendar days were read, so staff can see their per-night prices arrive.
+  const nights = prices.nights.length;
+  if (!plan.changes.length) return answer({ status: "unchanged", unit: label, nights });
 
   const change: TablesUpdate<"units"> = {};
   for (const [field, value] of Object.entries(plan.rates)) change[RATE_COLUMNS[field as RateField]] = value;
@@ -114,5 +134,5 @@ export async function POST(request: Request) {
   if (!data?.length) return answer({ status: "skipped", message: "Your portal account cannot change this unit." }, 403);
   console.info(`[airbnb-sync] ${profile.id} updated ${label} (listing ${listingId}): ${plan.changes.join("; ")}`);
   revalidatePath(`/units/${u.id}`);
-  return answer({ status: "saved", unit: label, changes: plan.changes });
+  return answer({ status: "saved", unit: label, changes: plan.changes, nights });
 }

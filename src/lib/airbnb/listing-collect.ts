@@ -36,7 +36,12 @@ export interface AirbnbListingSent {
   nights: string[];
 }
 
-export function collectAirbnbListing(doc: Document, href: string, withText: boolean): AirbnbListingSent {
+/**
+ * `forAddress` (the default) keeps the result small enough to hand over in a
+ * new tab's address; the extension's price sync posts it instead, so it sends
+ * the whole page (a calendar's side panel comes last in its text).
+ */
+export function collectAirbnbListing(doc: Document, href: string, withText: boolean, forAddress?: boolean): AirbnbListingSent {
   const MAX_ENCODED = 60000;
   const photos: string[] = [];
   const seenPhoto: Record<string, boolean> = {};
@@ -156,7 +161,8 @@ export function collectAirbnbListing(doc: Document, href: string, withText: bool
   // price is in the label or shown in the day ("386 د.إ").
   const nights: string[] = [];
   const seenNight: Record<string, boolean> = {};
-  const money = /AED|USD|EUR|GBP|SAR|د\.إ|\$|€|£/;
+  // Dirhams in any Arabic letters ("د.إ") or the dirham sign: on Airbnb's English pages Arabic is only ever the currency.
+  const money = /AED|USD|EUR|GBP|SAR|[\u0600-\u06FF\uFE70-\uFEFF]|\u20C3|\$|€|£/;
   // What a day shows, its parts kept apart ("1", "386د.إ" is not 1386).
   const shownIn = function (el: Element) {
     const live = (el as HTMLElement).innerText;
@@ -202,7 +208,7 @@ export function collectAirbnbListing(doc: Document, href: string, withText: bool
     facts: facts,
     amenities: amenities,
     photos: photos.slice(0, 100),
-    text: withText && body ? String(body.innerText || "").slice(0, 15000) : "",
+    text: withText && body ? String(body.innerText || "").slice(0, forAddress === false ? 100000 : 15000) : "",
     prices: prices,
     nights: nights,
   };
@@ -212,6 +218,7 @@ export function collectAirbnbListing(doc: Document, href: string, withText: bool
   const size = function () {
     return encodeURIComponent(JSON.stringify(out)).length;
   };
+  if (forAddress === false) return out;
   while (size() > MAX_ENCODED && out.text.length > 0) out.text = out.text.slice(0, Math.floor(out.text.length / 2) - 1);
   while (size() > MAX_ENCODED && out.desc && out.desc.length > 500) out.desc = out.desc.slice(0, Math.floor(out.desc.length / 2));
   while (size() > MAX_ENCODED && out.nights.length > 30) out.nights = out.nights.slice(0, out.nights.length - 30);

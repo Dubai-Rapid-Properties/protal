@@ -109,7 +109,7 @@ function airbnbScript(adminUrl: string): string {
   // What changes when the prices on screen change: the page's price settings,
   // the calendar's night labels and the lines of text that carry an amount.
   function signature(d) {
-    var lines = String(d.text || "").split("\\n").filter(function (l) { return /\\d/.test(l) && /AED|د\\.إ|USD|\\$|€|£|%/.test(l); });
+    var lines = String(d.text || "").split("\\n").filter(function (l) { return /\\d/.test(l) && /AED|[\\u0600-\\u06FF\\uFE70-\\uFEFF]|\\u20C3|USD|\\$|€|£|%/.test(l); });
     return JSON.stringify([location.pathname, d.prices, d.nights, lines]);
   }
 
@@ -127,7 +127,7 @@ function airbnbScript(adminUrl: string): string {
     lastRun = Date.now();
     var d;
     try {
-      d = collectAirbnbListing(document, location.href, true);
+      d = collectAirbnbListing(document, location.href, true, false);
     } catch (e) {
       // Said once per kind of failure, not every few seconds.
       var why = "read:" + String(e && e.message);
@@ -137,7 +137,7 @@ function airbnbScript(adminUrl: string): string {
     }
     var sig = signature(d);
     if (sig === lastSig) return;
-    if (!Object.keys(d.prices).length && !d.nights.length && !/AED|د\\.إ|USD|\\$|€|£/.test(d.text)) return;
+    if (!Object.keys(d.prices).length && !d.nights.length && !/AED|[\\u0600-\\u06FF\\uFE70-\\uFEFF]|\\u20C3|USD|\\$|€|£/.test(d.text)) return;
     sending = true;
     lastSig = sig;
     // The page's JSON is as it was when the page loaded; after a change on Airbnb a fresh copy has the new settings.
@@ -145,7 +145,7 @@ function airbnbScript(adminUrl: string): string {
       .then(function (r) { return r.ok ? r.text() : ""; })
       .then(function (html) {
         if (!html) return;
-        var fresh = collectAirbnbListing(new DOMParser().parseFromString(html, "text/html"), location.href, false);
+        var fresh = collectAirbnbListing(new DOMParser().parseFromString(html, "text/html"), location.href, false, false);
         d.prices = fresh.prices;
       })
       .catch(function () {})
@@ -163,8 +163,9 @@ function airbnbScript(adminUrl: string): string {
             lastSig = "";
             return note(RELOAD, true);
           }
-          if (res.status === "saved") note("Prices saved to " + res.unit + ": " + res.changes.join(", ") + ". The website follows within minutes.");
-          else if (res.status === "unchanged") note("Prices match " + res.unit + " in the portal.");
+          var days = typeof res.nights === "number" ? " (" + res.nights + " calendar days read)" : "";
+          if (res.status === "saved") note("Prices saved to " + res.unit + days + ": " + res.changes.join(", ") + ". The website follows within minutes.");
+          else if (res.status === "unchanged") note("Prices match " + res.unit + " in the portal" + days + ".");
           else {
             // Sent again once the page changes (or after signing in, on the next change).
             if (res.status === "signin" || res.status === "error") lastSig = "";
