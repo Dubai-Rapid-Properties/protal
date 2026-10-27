@@ -151,20 +151,41 @@ export function collectAirbnbListing(doc: Document, href: string, withText: bool
   };
   addPhotos(meta('meta[property="og:image"]'));
 
-  // The host calendar: days labelled with their date and price.
+  // The host calendar: days with their date and price. The date is in the day's
+  // label ("Saturday, November 1, 2026") or in an attribute ("2026-11-01"); the
+  // price is in the label or shown in the day ("386 د.إ").
   const nights: string[] = [];
   const seenNight: Record<string, boolean> = {};
+  const money = /AED|USD|EUR|GBP|SAR|د\.إ|\$|€|£/;
+  // What a day shows, its parts kept apart ("1", "386د.إ" is not 1386).
+  const shownIn = function (el: Element) {
+    const live = (el as HTMLElement).innerText;
+    return String(typeof live === "string" && live ? live : el.textContent || "").replace(/\s+/g, " ").trim();
+  };
+  const addNight = function (label: string) {
+    if (money.test(label) && !seenNight[label] && nights.length < 400) {
+      seenNight[label] = true;
+      nights.push(label);
+    }
+  };
+  const dated = doc.querySelectorAll("[data-testid], [data-date], [data-day], [data-key]");
+  for (let d = 0; d < dated.length && nights.length < 400; d++) {
+    const el = dated[d];
+    const attrs = [el.getAttribute("data-date"), el.getAttribute("data-day"), el.getAttribute("data-testid"), el.getAttribute("data-key")].join(" ");
+    const iso = attrs.match(/\b20\d\d-\d\d-\d\d\b/);
+    if (!iso) continue;
+    const shown = shownIn(el);
+    if (shown.length < 60) addNight(iso[0] + " " + shown);
+  }
   const days = doc.querySelectorAll("[aria-label], [title]");
   for (let d = 0; d < days.length && nights.length < 400; d++) {
     let label = days[d].getAttribute("aria-label") || days[d].getAttribute("title") || "";
     if (label.length > 200 || !/\b20\d\d\b/.test(label)) continue;
-    const money = /AED|USD|EUR|GBP|SAR|د\.إ|\$|€|£/;
-    const shown = (days[d].textContent || "").trim();
-    if (!money.test(label) && shown.length < 60 && money.test(shown)) label += " " + shown;
-    if (money.test(label) && !seenNight[label]) {
-      seenNight[label] = true;
-      nights.push(label);
+    if (!money.test(label)) {
+      const shown = shownIn(days[d]);
+      if (shown.length < 60 && money.test(shown)) label += " " + shown;
     }
+    addNight(label);
   }
 
   const h1 = doc.querySelector("h1");

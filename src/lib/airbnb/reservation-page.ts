@@ -51,12 +51,16 @@ function toNumber(raw: string): number {
   return Number.isFinite(n) ? n : NaN;
 }
 
-/** The money amount in a line: the one next to a currency, else the last one. */
+// An amount with its currency after it, as Airbnb writes dirhams ("386 د.إ", "1,250د.إ").
+const AMOUNT_THEN_CURRENCY = /(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?\s*(?=AED\b|USD\b|EUR\b|GBP\b|SAR\b|د\.إ)/g;
+
+/** The money amount in a line: the one next to a currency (before it, else after it), else the last one. */
 export function amountIn(line: string): number | null {
   const found = [...line.matchAll(NUMBER)].map((m) => m[0]).filter((m) => /\d/.test(m));
   if (found.length === 0) return null;
   const withCurrency = found.filter((m) => CURRENCY.test(m));
-  const pick = (withCurrency.length ? withCurrency : found).at(-1)!;
+  const before = [...line.matchAll(AMOUNT_THEN_CURRENCY)].map((m) => m[0]);
+  const pick = (withCurrency.length ? withCurrency : before.length ? before : found).at(-1)!;
   const n = toNumber(pick);
   return Number.isFinite(n) ? n : null;
 }

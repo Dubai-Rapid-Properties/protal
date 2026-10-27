@@ -75,9 +75,21 @@ const LABELS: { field: Field; label: RegExp; not?: RegExp; percent?: boolean }[]
   { field: "monthlyDiscount", label: /^monthly( discount)?\b/i, percent: true },
 ];
 
+/** The calendar's side panel puts the value first: "229 د.إ per night", "2% weekly discount". */
+const VALUE_FIRST: { field: Field; re: RegExp; percent?: boolean }[] = [
+  { field: "nightly", re: /^(.*\d.*?)\s*(?:per night|\/\s*night|nightly price|base price)$/i },
+  { field: "weekend", re: /^(.*\d.*?)\s*weekend (?:nightly )?price$/i },
+  { field: "weeklyDiscount", re: /^(\d{1,2}(?:\.\d+)?)\s*%\s*weekly(?: discount)?$/i, percent: true },
+  { field: "monthlyDiscount", re: /^(\d{1,2}(?:\.\d+)?)\s*%\s*monthly(?: discount)?$/i, percent: true },
+];
+
+/** Right-to-left marks Arabic amounts come wrapped in ("229 د.إ"). */
+const BIDI = /[\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]/g;
+
 function fromText(text: string): { values: Partial<Record<Field, number>>; currency: string | null } {
   const lines = text
     .replace(/\r\n?/g, "\n")
+    .replace(BIDI, "")
     .split("\n")
     .map((l) => l.replace(/\s+/g, " ").trim())
     .filter(Boolean);
@@ -109,11 +121,27 @@ function fromText(text: string): { values: Partial<Record<Field, number>>; curre
       }
     }
   }
+  // Then the side panel's lines, for what the labels did not give.
+  for (const line of lines) {
+    for (const { field, re, percent } of VALUE_FIRST) {
+      const m = values[field] === undefined ? line.match(re) : null;
+      if (!m) continue;
+      if (percent) values[field] = Number(m[1]);
+      else if (currencyOf(m[1])) {
+        const n = money(m[1], 1_000_000);
+        if (n != null) {
+          values[field] = n;
+          currency ??= currencyOf(m[1]);
+        }
+      }
+    }
+  }
   return { values, currency };
 }
 
 /** "Thursday, October 15, 2026, AED 450, available" → { date, price }. */
-export function nightFromLabel(label: string, today: string): { date: string; price: number; currency: string } | null {
+export function nightFromLabel(raw: string, today: string): { date: string; price: number; currency: string } | null {
+  const label = raw.replace(BIDI, "");
   const currency = currencyOf(label);
   const date = parseDateText(label, today);
   if (!currency || !date) return null;
