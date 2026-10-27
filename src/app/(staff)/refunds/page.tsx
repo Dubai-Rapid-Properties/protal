@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatDate } from "@/lib/dates";
 import { BUCKETS, storage } from "@/lib/storage";
 import { REFUND_PEOPLE, REFUND_STATUS, isPdf, type RefundStatus } from "@/lib/refunds";
+import { RefundImageButton } from "./refund-image-button";
 import { SettleButtons } from "./settle-buttons";
 
 export const metadata = { title: "Refunds" };
@@ -203,6 +204,7 @@ export default async function RefundsPage({
                           {r.settle_note ? ` · ${r.settle_note}` : ""}
                         </p>
                       )}
+                      {status === "refunded" && <RefundImageButton refund={r} />}
                     </TableCell>
                     {canSettle && (
                       <TableCell className="text-right">

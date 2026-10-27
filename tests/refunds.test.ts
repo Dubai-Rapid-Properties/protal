@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { REFUND_PEOPLE, isPdf, receiptPath, receiptProblem } from "@/lib/refunds";
+import { REFUND_PEOPLE, isPdf, receiptPath, receiptProblem, refundImageName, refundReference } from "@/lib/refunds";
+import { wrapText } from "@/lib/refund-image";
 import { can } from "@/lib/auth/rbac";
 
 test("receipts: photos and PDFs up to 4 MB", () => {
@@ -20,4 +21,15 @@ test("every staff member sees refunds; only super admins settle; owners neither"
   assert.equal(can("finance", "refunds.settle"), false);
   assert.equal(can("owner", "refunds.view"), false);
   assert.deepEqual([...REFUND_PEOPLE], ["Jasko", "Tara", "Ann", "Delia", "Dulshan"]);
+});
+
+test("the refunded image: reference, file name, wrapped text", () => {
+  assert.equal(refundReference("3f2a9c1e-77b0-4d2e-9a1b-0c3d4e5f6a7b"), "RF-3F2A9C1E");
+  assert.equal(refundImageName({ spent_by: "Jasko", settled_on: "2026-10-27" }), "refund-jasko-2026-10-27.png");
+  assert.equal(refundImageName({ spent_by: "Ann Marie", settled_on: null }), "refund-ann-marie.png");
+
+  const measure = (s: string) => s.length;
+  assert.deepEqual(wrapText("Printer ink and paper", 12, measure, 3), ["Printer ink", "and paper"]);
+  assert.deepEqual(wrapText("one two three four five six", 9, measure, 2), ["one two", "three…"]);
+  assert.deepEqual(wrapText("abcdefghij", 4, measure, 5), ["abcd", "efgh", "ij"]);
 });
