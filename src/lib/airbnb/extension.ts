@@ -15,7 +15,7 @@
  * website) as the signed-in staff member. That is the only call it makes, and
  * it asks for no permissions beyond running on Airbnb's pages and this portal.
  */
-import { collectAirbnbListing } from "@/lib/airbnb/listing-collect";
+import { collectorSource } from "@/lib/airbnb/listing-collect";
 import { EXTENSION_VERSION } from "@/lib/airbnb/extension-version";
 
 export { EXTENSION_VERSION };
@@ -72,7 +72,7 @@ function airbnbScript(adminUrl: string): string {
 (function () {
   if (window.top !== window || document.getElementById("drp-airbnb-button")) return;
   var PORTAL = ${JSON.stringify(adminUrl)};
-  var collectAirbnbListing = ${collectAirbnbListing.toString()};
+  var collectAirbnbListing = ${collectorSource()};
 
   function open(path, data) {
     chrome.runtime.sendMessage({ open: PORTAL + path + "#" + encodeURIComponent(JSON.stringify(data)) });

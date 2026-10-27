@@ -220,6 +220,16 @@ export function collectAirbnbListing(doc: Document, href: string, withText: bool
 }
 
 /**
+ * collectAirbnbListing's source as an expression, to run on airbnb.com. The
+ * production build (esbuild's keepNames, on Cloudflare) wraps the functions
+ * inside it in calls to its own `__name` helper, which the source carries but
+ * airbnb.com does not have ("__name is not defined"), so it comes along.
+ */
+export function collectorSource(): string {
+  return "(function(){var __name=function(f){return f;};return " + collectAirbnbListing.toString() + ";})()";
+}
+
+/**
  * The bookmarklet: collects the listing on airbnb.com and opens `target` in a
  * new tab with it in the fragment (#...), which never reaches the server or
  * its logs. Encoded, because a javascript: address is URL-decoded before it
@@ -227,9 +237,9 @@ export function collectAirbnbListing(doc: Document, href: string, withText: bool
  */
 export function listingBookmarklet(target: string): string {
   const code =
-    "(function(){try{var d=(" +
-    collectAirbnbListing.toString() +
-    ")(document,location.href,true);" +
+    "(function(){try{var d=" +
+    collectorSource() +
+    "(document,location.href,true);" +
     `window.open(${JSON.stringify(target)}+'#'+encodeURIComponent(JSON.stringify(d)),'_blank','noopener');` +
     "}catch(e){alert('D|R|P could not read this page. Use copy and paste on the import page instead.');}})();";
   return "javascript:" + encodeURIComponent(code);
