@@ -203,8 +203,9 @@ export function ListingImport({
               the days with their prices, the coming nights become the website&apos;s seasons.
             </li>
             <li>
-              This is a one-click refresh, not a live sync: when prices change on Airbnb (Smart Pricing included),
-              import again.
+              With the extension (version 1.1 or later) prices also save on their own: whenever a listing&apos;s
+              Pricing or Calendar page is open on Airbnb, its unit takes the prices shown (AED only) and a note on
+              Airbnb says what changed. Smart Pricing changes arrive the next time that page is opened.
             </li>
           </ol>
         </CardContent>

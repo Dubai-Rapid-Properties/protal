@@ -37,10 +37,17 @@ test("the extension is built for the portal it came from", () => {
   assert.ok(manifest.content_scripts[0].matches.includes("https://*.airbnb.com/*"));
   assert.deepEqual(manifest.content_scripts[1].matches, ["https://admin.example.com/*"]);
   assert.equal(manifest.permissions, undefined);
+  // Only this portal, for the price sync with the staff member's session.
+  assert.deepEqual(manifest.host_permissions, ["https://admin.example.com/*"]);
 
   const airbnb = files[`${EXTENSION_FOLDER}/airbnb.js`] as string;
   assert.ok(airbnb.includes('"https://admin.example.com"'));
   assert.ok(airbnb.includes("collectAirbnbListing"));
+  // Regexes and "\n" reach the browser escaped as written, not eaten by the template.
+  assert.ok(airbnb.includes("multicalendar)\\/\\d{3,25}/i"));
+  assert.ok(airbnb.includes('split("\\n")'));
+  const background = files[`${EXTENSION_FOLDER}/background.js`] as string;
+  assert.ok(background.includes('"https://admin.example.com" + "/units/from-airbnb/sync"') || background.includes('PORTAL + "/units/from-airbnb/sync"'));
   // Every script is plain JavaScript a browser can parse.
   for (const name of ["airbnb.js", "background.js", "portal.js"]) {
     assert.doesNotThrow(() => new Function(files[`${EXTENSION_FOLDER}/${name}`] as string), name);
