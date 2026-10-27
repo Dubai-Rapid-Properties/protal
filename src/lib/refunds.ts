@@ -46,12 +46,3 @@ export function paymentProofPath(refundId: string, type: string, now = Date.now(
 }
 
 export const isPdf = (path: string) => path.toLowerCase().endsWith(".pdf");
-
-/** The short reference printed on a refund's confirmation image. */
-export const refundReference = (id: string) => `RF-${id.replace(/-/g, "").slice(0, 8).toUpperCase()}`;
-
-/** The confirmation image's file name: refund-jasko-2026-10-27.png */
-export function refundImageName(r: { spent_by: string; settled_on: string | null }): string {
-  const who = r.spent_by.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "claim";
-  return `refund-${who}${r.settled_on ? `-${r.settled_on}` : ""}.png`;
-}
