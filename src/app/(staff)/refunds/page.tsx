@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FileText, HandCoins, Paperclip, Plus } from "lucide-react";
+import { FileText, HandCoins, Paperclip, Plus, Receipt } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireCapability } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
@@ -42,7 +42,9 @@ export default async function RefundsPage({
 
   let query = supabase
     .from("refunds")
-    .select("id, spent_by, description, amount_aed, spent_on, receipt_path, status, settled_on, settle_note, created_at")
+    .select(
+      "id, spent_by, description, amount_aed, spent_on, receipt_path, payment_proof_path, status, settled_on, settle_note, created_at"
+    )
     .order("spent_on", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(500);
@@ -59,13 +61,16 @@ export default async function RefundsPage({
   const canSettle = can(profile.role, "refunds.settle");
 
   // Each receipt opens through a short-lived link: the bucket is private.
-  const receipts = new Map(
-    await Promise.all(
+  const signed = (path: string) => storage.signedUrl(BUCKETS.documents, path, 3600).catch(() => null);
+  const [receipts, proofs] = await Promise.all([
+    Promise.all(refunds.filter((r) => r.receipt_path).map(async (r) => [r.id, await signed(r.receipt_path!)] as const)),
+    // The payment receipt shows once the claim is refunded (Undo keeps it for a re-settle).
+    Promise.all(
       refunds
-        .filter((r) => r.receipt_path)
-        .map(async (r) => [r.id, await storage.signedUrl(BUCKETS.documents, r.receipt_path!, 3600).catch(() => null)] as const)
-    )
-  );
+        .filter((r) => r.payment_proof_path && r.status === "refunded")
+        .map(async (r) => [r.id, await signed(r.payment_proof_path!)] as const)
+    ),
+  ]).then(([a, b]) => [new Map(a), new Map(b)]);
 
   const owed = (name: string) =>
     waiting.filter((w) => w.spent_by === name).reduce((sum, w) => sum + Number(w.amount_aed), 0);
@@ -168,6 +173,7 @@ export default async function RefundsPage({
             <TableBody>
               {refunds.map((r) => {
                 const url = receipts.get(r.id);
+                const proofUrl = proofs.get(r.id);
                 const status = (r.status in REFUND_STATUS ? r.status : "pending") as RefundStatus;
                 return (
                   <TableRow key={r.id}>
@@ -204,11 +210,28 @@ export default async function RefundsPage({
                           {r.settle_note ? ` · ${r.settle_note}` : ""}
                         </p>
                       )}
+                      {proofUrl && (
+                        <a
+                          href={proofUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-0.5 flex items-center gap-1 text-xs font-medium text-[var(--success)] hover:underline"
+                        >
+                          {isPdf(r.payment_proof_path!) ? <FileText className="size-3.5" /> : <Receipt className="size-3.5" />}
+                          Payment receipt
+                        </a>
+                      )}
                       {status === "refunded" && <RefundImageButton refund={r} />}
                     </TableCell>
                     {canSettle && (
                       <TableCell className="text-right">
-                        <SettleButtons refundId={r.id} status={status} />
+                        <SettleButtons
+                          refundId={r.id}
+                          status={status}
+                          spentBy={r.spent_by}
+                          amount={r.amount_aed}
+                          hasProof={!!r.payment_proof_path}
+                        />
                       </TableCell>
                     )}
                   </TableRow>

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BedDouble, Bookmark, CalendarDays, LogIn, LogOut, Plus, Search, Upload } from "lucide-react";
+import { BedDouble, Bookmark, CalendarDays, ChevronLeft, ChevronRight, LogIn, LogOut, Plus, Search, Upload } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireCapability } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
@@ -21,7 +21,8 @@ import {
   ROW_CLICKABLE,
 } from "@/components/ui/table";
 import { formatDate } from "@/lib/dates";
-import { dubaiToday } from "@/lib/calendar";
+import { addDays, dubaiToday } from "@/lib/calendar";
+import { DAY_STATUSES, TODAY_STATUSES, dayCounts, dayLabel, onDay, parseDay } from "@/lib/booking-day";
 import { BOOKING_STATUS, SALES_CHANNEL } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
@@ -29,15 +30,17 @@ export const metadata = { title: "Bookings" };
 
 const VIEWS = {
   upcoming: "Upcoming and in-house",
-  arriving: "Arriving today",
-  departing: "Departing today",
-  in_house: "In house now",
+  arriving: "Arriving",
+  departing: "Departing",
+  in_house: "In house",
   past: "Past stays",
   cancelled: "Cancelled and no-shows",
   needs_price: "Needs a price",
   all: "All bookings",
 } as const;
 type View = keyof typeof VIEWS;
+/** The views that follow the day chosen above the cards. */
+const DAY_VIEWS: readonly View[] = ["arriving", "departing", "in_house"];
 
 const LIVE = ["inquiry", "tentative", "confirmed", "checked_in"] as const;
 /** Stays that happen or happened, i.e. that should have a price. */
@@ -52,13 +55,16 @@ const NO_PAYOUT = "payout_expected_aed.is.null,payout_expected_aed.eq.0";
 export default async function BookingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; view?: string; unit?: string; channel?: string }>;
+  searchParams: Promise<{ q?: string; view?: string; unit?: string; channel?: string; day?: string }>;
 }) {
   const params = await searchParams;
   const view: View = params.view && params.view in VIEWS ? (params.view as View) : "upcoming";
   const channel: ChannelTab =
     params.channel && params.channel in CHANNELS ? (params.channel as ChannelTab) : "all";
   const today = dubaiToday();
+  // The cards' day: today, or the day before or after (?day=YYYY-MM-DD).
+  const day = parseDay(params.day, today);
+  const isToday = day === today;
   const supabase = await createClient();
 
   let query = supabase
@@ -68,16 +74,23 @@ export default async function BookingsPage({
   if (view === "upcoming") {
     query = query.in("status", [...LIVE]).gte("check_out", today).order("check_in");
   } else if (view === "arriving") {
-    // The same rules as the cards above.
-    query = query.eq("status", "confirmed").eq("check_in", today).order("check_in");
+    // The same rules as the cards above (lib/booking-day).
+    query = isToday
+      ? query.eq("status", "confirmed").eq("check_in", day).order("check_in")
+      : query.in("status", [...DAY_STATUSES]).eq("check_in", day).order("check_in");
   } else if (view === "departing") {
-    query = query.in("status", ["confirmed", "checked_in"]).eq("check_out", today).order("check_in");
-  } else if (view === "in_house") {
     query = query
-      .in("status", ["confirmed", "checked_in"])
-      .gt("check_out", today)
-      .or(`check_in.lt.${today},and(check_in.eq.${today},status.eq.checked_in)`)
-      .order("check_out");
+      .in("status", [...(isToday ? TODAY_STATUSES : DAY_STATUSES)])
+      .eq("check_out", day)
+      .order("check_in");
+  } else if (view === "in_house") {
+    query = isToday
+      ? query
+          .in("status", [...TODAY_STATUSES])
+          .gt("check_out", day)
+          .or(`check_in.lt.${day},and(check_in.eq.${day},status.eq.checked_in)`)
+          .order("check_out")
+      : query.in("status", [...DAY_STATUSES]).gt("check_out", day).lt("check_in", day).order("check_out");
   } else if (view === "past") {
     query = query
       .in("status", ["checked_out", "checked_in", "confirmed"])
@@ -97,7 +110,7 @@ export default async function BookingsPage({
     query = query.or(`booking_number.ilike.%${term}%,external_booking_id.ilike.%${term}%`);
   }
 
-  const [profile, { data, error }, unitsResult, unpricedResult, todayResult] = await Promise.all([
+  const [profile, { data, error }, unitsResult, unpricedResult, dayResult] = await Promise.all([
     requireCapability("bookings.view"),
     query.limit(500),
     supabase
@@ -113,25 +126,27 @@ export default async function BookingsPage({
       .in("status", [...PRICED])
       .eq("gross_total_aed", 0)
       .or(NO_PAYOUT),
-    // Today's movements, whatever the filter.
+    // The day's movements, whatever the filter.
     supabase
       .from("bookings")
       .select("status, check_in, check_out")
-      .in("status", ["confirmed", "checked_in"])
-      .lte("check_in", today)
-      .gte("check_out", today),
+      .in("status", [...(isToday ? TODAY_STATUSES : DAY_STATUSES)])
+      .lte("check_in", day)
+      .gte("check_out", day),
   ]);
 
   const bookings = data ?? [];
-  const movements = todayResult.data ?? [];
   // By dates, not status: Airbnb stays stay "Confirmed" unless someone
   // checks the guest in, but the guest is there all the same.
-  const arriving = movements.filter((b) => b.check_in === today && b.status === "confirmed").length;
-  const departing = movements.filter((b) => b.check_out === today).length;
-  // Today's arrivals count once checked in; until then they are "arriving".
-  const inHouse = movements.filter(
-    (b) => b.check_out > today && (b.check_in < today || b.status === "checked_in")
-  ).length;
+  const { arriving, departing, inHouse } = dayCounts(dayResult.data ?? [], day, today);
+  // Links that keep the chosen day; today needs no parameter.
+  const dayQuery = isToday ? "" : `&day=${day}`;
+  const dayHref = (d: string) => {
+    const qs = new URLSearchParams();
+    for (const key of ["view", "channel", "unit", "q"] as const) if (params[key]) qs.set(key, params[key]!);
+    if (d !== today) qs.set("day", d);
+    return qs.size ? `/bookings?${qs}` : "/bookings";
+  };
   const canManage = can(profile.role, "bookings.manage");
   // Housekeeping sees the stays, not what they earn
   const showRevenue = can(profile.role, "bookings.revenue");
@@ -193,24 +208,49 @@ export default async function BookingsPage({
         }
       />
 
+      {/* The day the cards count: back and forward a day at a time. */}
+      <nav className="mb-2 flex flex-wrap items-center gap-1.5" aria-label="Day">
+        <Button asChild variant="outline" size="icon" className="size-8">
+          <Link href={dayHref(addDays(day, -1))} aria-label="Previous day">
+            <ChevronLeft className="size-4" />
+          </Link>
+        </Button>
+        <p className="min-w-28 text-center text-sm font-medium" aria-live="polite">
+          {dayLabel(day, today)}
+          {dayLabel(day, today) !== formatDate(day) && (
+            <span className="font-normal text-[var(--muted-foreground)]"> · {formatDate(day)}</span>
+          )}
+        </p>
+        <Button asChild variant="outline" size="icon" className="size-8">
+          <Link href={dayHref(addDays(day, 1))} aria-label="Next day">
+            <ChevronRight className="size-4" />
+          </Link>
+        </Button>
+        {!isToday && (
+          <Button asChild variant="ghost" size="sm">
+            <Link href={dayHref(today)}>Today</Link>
+          </Button>
+        )}
+      </nav>
+
       <div className="mb-4 grid grid-cols-3 gap-3">
         <StatCard
-          label="Arriving today"
+          label={onDay("Arriving", day, today)}
           value={arriving}
           icon={<LogIn className="size-4" />}
-          href="/bookings?view=arriving"
+          href={`/bookings?view=arriving${dayQuery}`}
         />
         <StatCard
-          label="Departing today"
+          label={onDay("Departing", day, today)}
           value={departing}
           icon={<LogOut className="size-4" />}
-          href="/bookings?view=departing"
+          href={`/bookings?view=departing${dayQuery}`}
         />
         <StatCard
-          label="In house"
+          label={onDay("In house", day, today)}
           value={inHouse}
           icon={<BedDouble className="size-4" />}
-          href="/bookings?view=in_house"
+          href={`/bookings?view=in_house${dayQuery}`}
         />
       </div>
 
@@ -246,6 +286,7 @@ export default async function BookingsPage({
           if (view !== "upcoming") qs.set("view", view);
           if (params.unit) qs.set("unit", params.unit);
           if (params.q) qs.set("q", params.q);
+          if (!isToday) qs.set("day", day);
           const href = qs.size ? `/bookings?${qs}` : "/bookings";
           return (
             <Link
@@ -269,6 +310,7 @@ export default async function BookingsPage({
         <CardContent className="p-3">
           <form className="flex flex-col gap-2 sm:flex-row">
             {channel !== "all" && <input type="hidden" name="channel" value={channel} />}
+            {!isToday && <input type="hidden" name="day" value={day} />}
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
               <Input
@@ -291,7 +333,7 @@ export default async function BookingsPage({
                 .filter(([value]) => showRevenue || value !== "needs_price")
                 .map(([value, label]) => (
                   <option key={value} value={value}>
-                    {label}
+                    {DAY_VIEWS.includes(value as View) ? onDay(label, day, today) : label}
                   </option>
                 ))}
             </Select>

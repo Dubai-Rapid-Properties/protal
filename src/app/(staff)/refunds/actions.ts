@@ -8,7 +8,7 @@ import { can } from "@/lib/auth/rbac";
 import { BUCKETS, storage } from "@/lib/storage";
 import { dubaiToday } from "@/lib/calendar";
 import { flushEmailsSoon } from "@/lib/notify/flush";
-import { REFUND_PEOPLE, receiptPath, receiptProblem } from "@/lib/refunds";
+import { REFUND_PEOPLE, paymentProofPath, receiptPath, receiptProblem } from "@/lib/refunds";
 
 export type ActionState = { error?: string; success?: string };
 
@@ -87,6 +87,48 @@ export async function addRefundReceipt(refundId: string, formData: FormData): Pr
   return { success: "Receipt added." };
 }
 
+/**
+ * Super admins: the proof a claim was paid back (a transfer screenshot, a
+ * photo of the receipt, a PDF). A new one replaces the last.
+ */
+export async function addPaymentProof(refundId: string, formData: FormData): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "refunds.settle")) return { error: "Only a super admin can add the payment receipt." };
+  if (!z.string().uuid().safeParse(refundId).success) return { error: "Claim not found." };
+
+  const file = formData.get("proof");
+  if (!(file instanceof File)) return { error: "Choose the payment receipt." };
+  const problem = receiptProblem(file);
+  if (problem) return { error: problem };
+
+  const supabase = await createClient();
+  const { data: claim } = await supabase.from("refunds").select("payment_proof_path").eq("id", refundId).maybeSingle();
+  if (!claim) return { error: "Claim not found." };
+
+  const path = paymentProofPath(refundId, file.type);
+  try {
+    await storage.upload(BUCKETS.documents, path, file);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Upload failed." };
+  }
+
+  const { data: saved, error } = await supabase
+    .from("refunds")
+    .update({ payment_proof_path: path })
+    .eq("id", refundId)
+    .select("id");
+  if (error || !saved?.length) {
+    await storage.remove(BUCKETS.documents, path).catch(() => undefined);
+    return { error: error && error.code !== "42501" ? error.message : NOT_CHANGED };
+  }
+  if (claim.payment_proof_path) {
+    await storage.remove(BUCKETS.documents, claim.payment_proof_path).catch(() => undefined);
+  }
+
+  revalidatePath("/refunds");
+  return { success: "Payment receipt added." };
+}
+
 const settleSchema = z.object({
   status: z.enum(["refunded", "rejected", "pending"]),
   note: z.string().trim().max(300).optional(),
@@ -121,7 +163,7 @@ export async function settleRefund(refundId: string, formData: FormData): Promis
   };
 }
 
-/** Super admins: removes a claim entered by mistake, with its receipt. */
+/** Super admins: removes a claim entered by mistake, with its receipt and payment receipt. */
 export async function deleteRefund(refundId: string): Promise<ActionState> {
   const profile = await requireProfile();
   if (!can(profile.role, "refunds.settle")) return { error: "Only a super admin can delete a claim." };
@@ -132,11 +174,12 @@ export async function deleteRefund(refundId: string): Promise<ActionState> {
     .from("refunds")
     .delete()
     .eq("id", refundId)
-    .select("receipt_path");
+    .select("receipt_path, payment_proof_path");
   if (error) return { error: error.message };
   if (!removed?.length) return { error: NOT_CHANGED };
-  const path = removed[0].receipt_path;
-  if (path) await storage.remove(BUCKETS.documents, path).catch(() => undefined);
+  for (const path of [removed[0].receipt_path, removed[0].payment_proof_path]) {
+    if (path) await storage.remove(BUCKETS.documents, path).catch(() => undefined);
+  }
 
   revalidatePath("/refunds");
   return { success: "Claim deleted." };
