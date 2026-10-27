@@ -86,10 +86,20 @@ const VALUE_FIRST: { field: Field; re: RegExp; percent?: boolean }[] = [
 /** Right-to-left marks Arabic amounts come wrapped in ("229 د.إ"). */
 const BIDI = /[\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]/g;
 
+/**
+ * The ways a page can write dirhams: "د.إ" in plain or presentation-form
+ * letters, with any of the dots Arabic uses (or none), in either order, and the
+ * new dirham sign (U+20C3).
+ */
+const DIRHAM =
+  /[\u062F\uFEA9\uFEAA]\s*[.\u066B\u06D4\u2024\u00B7]?\s*[\u0625\u0627\uFE87\uFE88\uFE8D\uFE8E]\.?|[\u0625\u0627\uFE87\uFE88\uFE8D\uFE8E]\s*[.\u066B\u06D4\u2024\u00B7]?\s*[\u062F\uFEA9\uFEAA]|\u20C3/g;
+
+/** Text with right-to-left marks gone and dirhams written "AED": "386د.إ" → "386 AED ". */
+export const plainMoney = (text: string) => text.replace(BIDI, "").replace(DIRHAM, " AED ");
+
 function fromText(text: string): { values: Partial<Record<Field, number>>; currency: string | null } {
-  const lines = text
+  const lines = plainMoney(text)
     .replace(/\r\n?/g, "\n")
-    .replace(BIDI, "")
     .split("\n")
     .map((l) => l.replace(/\s+/g, " ").trim())
     .filter(Boolean);
@@ -127,7 +137,8 @@ function fromText(text: string): { values: Partial<Record<Field, number>>; curre
       const m = values[field] === undefined ? line.match(re) : null;
       if (!m) continue;
       if (percent) values[field] = Number(m[1]);
-      else if (currencyOf(m[1])) {
+      else {
+        // "per night" and "weekend price" say what the amount is, with or without a currency.
         const n = money(m[1], 1_000_000);
         if (n != null) {
           values[field] = n;
@@ -136,12 +147,14 @@ function fromText(text: string): { values: Partial<Record<Field, number>>; curre
       }
     }
   }
+  // An amount the page shows without a currency is in the one its currency button shows ("AED").
+  currency ??= lines.map((l) => l.match(/^(AED|USD|EUR|GBP|SAR)$/)?.[1]).find(Boolean) ?? null;
   return { values, currency };
 }
 
 /** "Thursday, October 15, 2026, AED 450, available" → { date, price }. */
 export function nightFromLabel(raw: string, today: string): { date: string; price: number; currency: string } | null {
-  const label = raw.replace(BIDI, "");
+  const label = plainMoney(raw);
   const currency = currencyOf(label);
   const date = parseDateText(label, today);
   if (!currency || !date) return null;
