@@ -76,6 +76,16 @@ begin
   perform set_config('role', 'postgres', true);
   raise notice 'TEST 303 PASS  no approver set: any super admin approves';
 
+  -- TEST 304 - deleting a statement takes its notifications with it, for everyone.
+  if not exists (select 1 from notifications where statement_id = v_stmt) then
+    raise exception 'TEST 304 FAILED: no notification carries the statement';
+  end if;
+  delete from owner_statements where id = v_stmt;
+  if exists (select 1 from notifications where link = '/finance/statements/' || v_stmt) then
+    raise exception 'TEST 304 FAILED: notifications outlived the statement';
+  end if;
+  raise notice 'TEST 304 PASS  deleting a statement removes its notifications for everyone';
+
   delete from notifications where kind in ('statement_review', 'statement_done');
   delete from owner_statements where id = v_stmt;
 end $$;

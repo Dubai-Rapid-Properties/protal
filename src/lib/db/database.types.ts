@@ -2959,6 +2959,8 @@ export type Database = {
           read_at: string | null;
           pushed_at: string | null;
           ticket_id: string | null;
+          refund_id: string | null;
+          statement_id: string | null;
         };
         Insert: {
           id?: string;
@@ -2973,6 +2975,8 @@ export type Database = {
           read_at?: string | null;
           pushed_at?: string | null;
           ticket_id?: string | null;
+          refund_id?: string | null;
+          statement_id?: string | null;
         };
         Update: {
           id?: string;
@@ -2987,6 +2991,8 @@ export type Database = {
           read_at?: string | null;
           pushed_at?: string | null;
           ticket_id?: string | null;
+          refund_id?: string | null;
+          statement_id?: string | null;
         };
         Relationships: [
           {

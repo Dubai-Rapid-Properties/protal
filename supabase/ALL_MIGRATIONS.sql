@@ -9531,3 +9531,3315 @@ begin
   );
 end;
 $$;
+
+-- ####################################################################
+-- ## 0047_move_stay_and_kept_payout.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0047 Move a stay to another unit; a cancelled stay that still pays
+--
+-- Two things staff could not record:
+--
+--   * A guest booked one unit and stays in another (Rita booked Cloud Tower
+--     2704 on Airbnb and stays in 405). move_booking() moves the booking -
+--     guest, price, Airbnb code - to the other unit. A stay synced from the
+--     first unit's Airbnb calendar is linked there (channel_stay_links, 0036),
+--     so that calendar's sync skips it instead of importing it again, and it
+--     loses its feed UID, so the new unit's sync never cancels it as "missing
+--     from the feed". Its calendar hold, turnover clean and income follow it:
+--     the income goes to the new unit's owner.
+--
+--   * A guest cancels but the channel still pays (a strict cancellation
+--     policy). bookings.payout_kept: the stay is cancelled - its dates are
+--     free - and its payout still posts as income, on its check-out day like
+--     any other stay (post_completed_bookings, 0023/0025).
+-- ============================================================================
+
+alter table bookings add column if not exists payout_kept boolean not null default false;
+
+comment on column bookings.payout_kept is
+  'Cancelled, but the channel still pays: payout_expected_aed posts as income on the check-out day.';
+
+-- The calendar hold follows a booking moved to another unit.
+drop trigger if exists bookings_sync_block on bookings;
+create trigger bookings_sync_block
+  after insert or update of status, check_in, check_out, unit_id on bookings
+  for each row execute function pms.sync_booking_block();
+
+
+-- ---------------------------------------------------------------------------
+-- move_booking
+-- ---------------------------------------------------------------------------
+create or replace function move_booking(p_booking_id uuid, p_unit_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  b        bookings%rowtype;
+  v_from   text;
+  v_to     text;
+  v_hold   record;
+  v_back   text;
+  v_note   text;
+begin
+  select * into b from bookings where id = p_booking_id for update;
+  if not found then
+    raise exception 'Booking not found' using errcode = 'no_data_found';
+  end if;
+  if not (pms.can_write_unit(b.unit_id) and pms.can_write_unit(p_unit_id)) then
+    raise exception 'You do not have access to both units' using errcode = 'insufficient_privilege';
+  end if;
+  if b.unit_id = p_unit_id then
+    raise exception 'The stay is already on that unit' using errcode = 'check_violation';
+  end if;
+  if b.status not in ('inquiry','tentative','confirmed','checked_in') then
+    raise exception 'Only an upcoming or current stay can be moved' using errcode = 'check_violation';
+  end if;
+
+  select p.name || ' ' || u.unit_number into v_from
+    from units u join properties p on p.id = u.property_id where u.id = b.unit_id;
+  select p.name || ' ' || u.unit_number into v_to
+    from units u join properties p on p.id = u.property_id where u.id = p_unit_id;
+  if v_to is null then
+    raise exception 'Unit not found' using errcode = 'no_data_found';
+  end if;
+
+  -- Owner stays, maintenance and manual holds on the new unit. Its channel
+  -- blocks are expected: staff block Airbnb there for the moved guest.
+  select reason, start_date, end_date into v_hold
+    from availability_blocks
+   where unit_id = p_unit_id
+     and reason not in ('booking','channel_sync')
+     and daterange(start_date, end_date, '[)') && daterange(b.check_in, b.check_out, '[)')
+   order by start_date
+   limit 1;
+  if found then
+    raise exception 'The unit is blocked from % to % (%)', v_hold.start_date, v_hold.end_date,
+      replace(v_hold.reason::text, '_', ' ') using errcode = 'check_violation';
+  end if;
+
+  -- Moving back to the unit whose calendar it came from: it is that
+  -- calendar's stay again, followed by its sync.
+  delete from channel_stay_links l
+   where l.unit_id = p_unit_id and l.booking_id = b.id and l.channel = b.channel
+  returning l.ical_uid into v_back;
+
+  if b.ical_uid is not null then
+    insert into channel_stay_links (unit_id, channel, ical_uid, code, start_date, end_date, booking_id)
+    values (b.unit_id, b.channel, b.ical_uid, b.external_booking_id, b.check_in, b.check_out, b.id)
+    on conflict (unit_id, channel, ical_uid) do update
+      set booking_id = excluded.booking_id, code = excluded.code,
+          start_date = excluded.start_date, end_date = excluded.end_date,
+          linked_by = auth.uid(), linked_at = now();
+  end if;
+
+  v_note := format('Moved from %s to %s on %s.', v_from, v_to,
+                   to_char((now() at time zone 'Asia/Dubai')::date, 'DD Mon YYYY'));
+  if b.ical_uid is not null then
+    v_note := v_note || format(
+      ' The %s reservation%s stays on %s''s listing; that calendar''s sync no longer changes this booking.',
+      case b.channel when 'airbnb' then 'Airbnb' when 'booking_com' then 'Booking.com'
+                     else initcap(replace(b.channel::text, '_', ' ')) end,
+      coalesce(' ' || b.external_booking_id, ''), v_from);
+  end if;
+
+  update bookings
+     set unit_id = p_unit_id,
+         ical_uid = v_back,
+         internal_notes = nullif(concat_ws(E'\n', nullif(internal_notes, ''), v_note), '')
+   where id = b.id;
+
+  -- Its turnover clean, if not started, moves with it; every unfinished
+  -- turnover on either unit points at the next arrival on its own unit.
+  update housekeeping_tasks
+     set unit_id = p_unit_id
+   where booking_id = b.id and status in ('pending','assigned');
+
+  update housekeeping_tasks t
+     set next_booking_id = (
+           select n.id from bookings n
+            where n.unit_id = t.unit_id
+              and n.check_in >= s.check_out
+              and n.status in ('tentative','confirmed','checked_in')
+              and n.id <> s.id
+            order by n.check_in
+            limit 1)
+    from bookings s
+   where s.id = t.booking_id
+     and t.kind = 'turnover'
+     and t.status in ('pending','assigned')
+     and t.unit_id in (b.unit_id, p_unit_id);
+end;
+$$;
+
+comment on function move_booking(uuid, uuid) is
+  'Moves a stay to another unit: its hold, turnover clean and income follow; a synced stay is linked on its old calendar so that sync skips it.';
+
+revoke all on function move_booking(uuid, uuid) from public, anon;
+grant execute on function move_booking(uuid, uuid) to authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- post_completed_bookings: as 0025, plus cancelled stays whose payout is
+-- kept, and a line that changes unit changes owner too.
+-- ---------------------------------------------------------------------------
+create or replace function post_completed_bookings()
+returns integer
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_today date := (now() at time zone 'Asia/Dubai')::date;
+  v_cat   uuid := (select id from gl_categories where code = 'INC-BOOKING');
+  v_posted integer;
+begin
+  -- Staff, or the service role (cron). Owners and tenants never post.
+  if auth.uid() is not null and not pms.is_staff() then
+    return 0;
+  end if;
+
+  -- Lines whose stay was deleted, not yet in a statement.
+  delete from ledger_entries le
+   where le.source_table = 'bookings'
+     and le.statement_id is null
+     and not exists (select 1 from bookings b where b.id = le.source_id);
+
+  -- Lines whose stay no longer qualifies, not yet in a statement.
+  delete from ledger_entries le
+   using bookings b
+   where le.source_table = 'bookings'
+     and le.source_id = b.id
+     and le.statement_id is null
+     and (not (b.status in ('confirmed','checked_in','checked_out')
+               or (b.status = 'cancelled' and b.payout_kept))
+          or b.check_out > v_today
+          or coalesce(b.payout_expected_aed, 0) <= 0);
+
+  -- Lines whose stay's payout, dates or unit moved, not yet in a statement.
+  update ledger_entries le
+     set amount_aed = b.payout_expected_aed,
+         entry_date = b.check_out,
+         unit_id    = b.unit_id,
+         owner_id   = case when le.unit_id is distinct from b.unit_id then
+                        (select uo.owner_id from unit_ownerships uo
+                          where uo.unit_id = b.unit_id and uo.end_date is null
+                          order by uo.is_primary_contact desc, uo.ownership_pct desc
+                          limit 1)
+                      else le.owner_id end
+    from bookings b
+   where le.source_table = 'bookings'
+     and le.source_id = b.id
+     and le.statement_id is null
+     and (le.amount_aed <> b.payout_expected_aed
+          or le.entry_date <> b.check_out
+          or le.unit_id is distinct from b.unit_id);
+
+  -- New lines for ended, priced stays.
+  insert into ledger_entries (
+    entry_date, unit_id, owner_id, category_id, direction, description,
+    amount_aed, vat_applicable, source_table, source_id, booking_id
+  )
+  select b.check_out,
+         b.unit_id,
+         (select uo.owner_id from unit_ownerships uo
+           where uo.unit_id = b.unit_id and uo.end_date is null
+           order by uo.is_primary_contact desc, uo.ownership_pct desc
+           limit 1),
+         v_cat,
+         'income',
+         case when b.status = 'cancelled' then 'Cancelled stay, payout kept ' else 'Stay ' end
+           || b.booking_number
+           || coalesce(' (' || case b.channel when 'airbnb' then 'Airbnb' when 'booking_com' then 'Booking.com' else initcap(replace(b.channel::text, '_', ' ')) end || ' ' || b.external_booking_id || ')', '')
+           || ', ' || to_char(b.check_in, 'DD Mon') || ' - ' || to_char(b.check_out, 'DD Mon YYYY'),
+         b.payout_expected_aed,
+         false,
+         'bookings',
+         b.id,
+         b.id
+    from bookings b
+   where (b.status in ('confirmed','checked_in','checked_out')
+          or (b.status = 'cancelled' and b.payout_kept))
+     and b.check_out <= v_today
+     and coalesce(b.payout_expected_aed, 0) > 0
+     and not exists (select 1 from ledger_entries le
+                      where le.source_table = 'bookings' and le.source_id = b.id);
+  get diagnostics v_posted = row_count;
+
+  return v_posted;
+end;
+$$;
+
+-- ####################################################################
+-- ## 0048_stay_times.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0048 Early check-in and late check-out
+--
+-- Guests arrive from 15:00 and leave by 12:00 - unless staff agree an early
+-- check-in or a late check-out. bookings.check_in_time / check_out_time
+-- (0005) hold the agreed time; empty means the standard one.
+--
+--   * The check-in and check-out alarms (0042-0045) ring an hour ahead of
+--     and at the stay's own time, and say that time.
+--   * The stay's turnover clean, not yet started, starts at the guest's
+--     check-out time on the check-out day, and follows a change of either.
+-- ============================================================================
+
+-- The time a stay checks in or out, Dubai time: its own, or the standard.
+create or replace function pms.stay_time(p_kind text, p_check_in_time time, p_check_out_time time)
+returns time
+language sql
+immutable
+as $$
+  select case p_kind
+           when 'check_out' then coalesce(p_check_out_time, time '12:00')
+           when 'check_in' then coalesce(p_check_in_time, time '15:00')
+           /* The day-before ring for housekeeping */
+           else time '16:00'
+         end;
+$$;
+
+create or replace function pms.due_stay_rings(p_at timestamptz)
+returns table (booking_id uuid, unit_id uuid, kind text, stage smallint)
+language sql
+stable
+security definer
+set search_path = public, pms
+as $$
+  with dubai as (
+    select (p_at at time zone 'Asia/Dubai')::date as today,
+           (p_at at time zone 'Asia/Dubai')::time as clock
+  ),
+  rings as (
+    select b.id, b.unit_id, 'check_out'::text as kind,
+           (case when d.clock >= pms.stay_time('check_out', b.check_in_time, b.check_out_time) then 2
+                 when d.clock >= pms.stay_time('check_out', b.check_in_time, b.check_out_time) - interval '1 hour' then 1
+                 else 0 end)::smallint as stage,
+           b.check_out_alarm_done as done
+      from bookings b, dubai d
+     where b.check_out = d.today
+       and b.status in ('confirmed','checked_in','checked_out')
+    union all
+    select b.id, b.unit_id, 'check_in',
+           (case when d.clock >= pms.stay_time('check_in', b.check_in_time, b.check_out_time) then 2
+                 when d.clock >= pms.stay_time('check_in', b.check_in_time, b.check_out_time) - interval '1 hour' then 1
+                 else 0 end)::smallint,
+           b.check_in_alarm_done
+      from bookings b, dubai d
+     where b.check_in = d.today
+       and b.status in ('confirmed','checked_in')
+    union all
+    /* The day before check-in, from 16:00: get the unit ready */
+    select b.id, b.unit_id, 'prepare',
+           (case when d.clock >= '16:00' then 1 else 0 end)::smallint,
+           b.prepare_alarm_done
+      from bookings b, dubai d
+     where b.check_in = d.today + 1
+       and b.status = 'confirmed'
+  )
+  select id, unit_id, kind, stage from rings where stage > done;
+$$;
+
+-- As 0044, saying each stay's own time.
+create or replace function due_stay_alarms(p_at timestamptz default now())
+returns table (
+  booking_id uuid,
+  booking_number text,
+  unit_id uuid,
+  unit_label text,
+  guest_name text,
+  kind text,
+  stage smallint,
+  due_at text
+)
+language sql
+stable
+security definer
+set search_path = public, pms
+as $$
+  select b.id, b.booking_number, u.id, p.name || ' · ' || u.unit_number,
+         g.full_name, r.kind, r.stage,
+         to_char(pms.stay_time(case r.kind when 'prepare' then 'check_in' else r.kind end,
+                               b.check_in_time, b.check_out_time), 'HH24:MI')
+    from pms.due_stay_rings(p_at) r
+    join bookings b on b.id = r.booking_id
+    join units u on u.id = b.unit_id
+    join properties p on p.id = u.property_id
+    left join guests g on g.id = b.guest_id
+   where pms.hears_stay_alarm(r.unit_id)
+     /* Getting units ready is housekeeping's alone */
+     and (r.kind <> 'prepare' or pms.my_role() = 'maintenance')
+   order by case r.kind when 'check_out' then 0 when 'check_in' then 1 else 2 end, p.name, u.unit_number;
+$$;
+
+-- As 0045, saying each stay's own time.
+create or replace function stay_alarm_pushes(p_at timestamptz default now())
+returns table (
+  subscription_id uuid,
+  endpoint text,
+  p256dh text,
+  auth text,
+  booking_id uuid,
+  booking_number text,
+  unit_label text,
+  kind text,
+  stage smallint,
+  due_at text
+)
+language sql
+stable
+security definer
+set search_path = public, pms
+as $$
+  select s.id, s.endpoint, s.p256dh, s.auth, b.id, b.booking_number,
+         p.name || ' · ' || u.unit_number, r.kind, r.stage,
+         to_char(pms.stay_time(case r.kind when 'prepare' then 'check_in' else r.kind end,
+                               b.check_in_time, b.check_out_time), 'HH24:MI')
+    from pms.due_stay_rings(p_at) r
+    join bookings b on b.id = r.booking_id
+    join units u on u.id = b.unit_id
+    join properties p on p.id = u.property_id
+    join profiles pr on pr.is_active and not pr.alarms_off
+     and ((pr.role = 'super_admin' and r.kind <> 'prepare')
+          or (pr.role = 'maintenance' and (
+                exists (select 1 from staff_unit_assignments sua
+                         where sua.profile_id = pr.id and sua.unit_id = u.id)
+             or exists (select 1 from staff_property_assignments spa
+                         where spa.profile_id = pr.id and spa.property_id = u.property_id))))
+    join push_subscriptions s on s.profile_id = pr.id;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- The turnover clean follows the guest's check-out day and time. Runs after
+-- bookings_schedule_turnover (triggers fire in name order), so it also sets
+-- a clean that trigger has just created.
+-- ---------------------------------------------------------------------------
+create or replace function pms.align_turnover()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_start timestamptz;
+begin
+  -- A late check-out moves the clean to the guest's leaving time; the
+  -- standard clean starts at 11:00 (0011).
+  v_start := (new.check_out + greatest(time '11:00', coalesce(new.check_out_time, time '11:00')))
+             at time zone 'Asia/Dubai';
+  update housekeeping_tasks
+     set scheduled_start = v_start,
+         scheduled_end   = v_start + interval '4 hours'
+   where booking_id = new.id
+     and kind = 'turnover'
+     and status in ('pending','assigned')
+     and scheduled_start is distinct from v_start;
+  return new;
+end;
+$$;
+
+drop trigger if exists bookings_turnover_time on bookings;
+create trigger bookings_turnover_time
+  after insert or update of status, check_out, check_out_time on bookings
+  for each row execute function pms.align_turnover();
+
+-- ####################################################################
+-- ## 0049_bookings_sheet.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0049 The admin team's bookings sheet feeds the portal
+--
+-- The admin team keeps direct and old-Airbnb-account stays in a Google
+-- Sheet. Every 15 minutes the calendar cron reads it (src/lib/sheet/sync.ts)
+-- and brings its stays from today on into the portal; the sheet decides their
+-- dates and cancellations. Stays from the current Airbnb account are left to
+-- their calendar feed.
+--
+--   * bookings.sheet_name: the guest as the sheet names them, on bookings the
+--     sheet made or took over - how the next read finds them again.
+--   * import_source 'bookings_sheet': made by the first read of the sheet,
+--     which records what is there without announcing it to owners.
+--   * bookings_sheet_sync: the last read - when, what it did, and the rows it
+--     could not place, for the Calendar sync page.
+-- ============================================================================
+
+alter table bookings add column if not exists sheet_name text;
+
+comment on column bookings.sheet_name is
+  'The guest as the bookings sheet names them; set on bookings the sheet sync made or took over.';
+
+create index if not exists bookings_sheet_name_idx on bookings (unit_id, sheet_name) where sheet_name is not null;
+
+alter table bookings drop constraint if exists bookings_import_source_check;
+alter table bookings add constraint bookings_import_source_check
+  check (import_source is null or import_source in ('earnings_csv', 'feed_first_read', 'bookings_sheet'));
+
+create table if not exists bookings_sheet_sync (
+  id         boolean primary key default true check (id),
+  synced_at  timestamptz not null default now(),
+  ok         boolean not null default true,
+  rows_read  integer not null default 0,
+  created    integer not null default 0,
+  updated    integer not null default 0,
+  cancelled  integer not null default 0,
+  problems   jsonb not null default '[]'::jsonb
+);
+
+comment on table bookings_sheet_sync is
+  'The last read of the admin bookings sheet: one row, written by the calendar cron.';
+
+alter table bookings_sheet_sync enable row level security;
+
+create policy bookings_sheet_sync_staff_read on bookings_sheet_sync
+  for select to authenticated
+  using (pms.is_staff());
+
+-- ####################################################################
+-- ## 0050_owner_invites.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0050 Owner sign-in links the portal issues itself
+--
+-- An owner's sign-in link carried Supabase's own one-time token: spent the
+-- first time it was used, and refused again whenever it was opened a second
+-- time (another browser, a phone after the laptop, WhatsApp's own browser
+-- and then Safari) - owners met "This link has expired" well within the 24
+-- hours it promised.
+--
+-- The link now carries a token of the portal's own. Opening it (Continue)
+-- makes a fresh Supabase sign-in on the spot, so it works again and again
+-- until it expires or the owner has chosen a password; a newer link for the
+-- same owner replaces it. Only the token's SHA-256 is kept.
+-- ============================================================================
+
+create table if not exists owner_invites (
+  id          uuid primary key default gen_random_uuid(),
+  token_hash  text not null unique,
+  profile_id  uuid not null references profiles(id) on delete cascade,
+  email       text not null,
+  created_by  uuid references profiles(id) on delete set null,
+  created_at  timestamptz not null default now(),
+  expires_at  timestamptz not null,
+  used_at     timestamptz
+);
+
+create index if not exists owner_invites_profile_idx on owner_invites (profile_id);
+
+comment on table owner_invites is
+  'Owner sign-in links (SHA-256 of the token). Written and read by the portal server only.';
+
+-- No policies: only the service role (the portal server) reads or writes it.
+alter table owner_invites enable row level security;
+
+-- ####################################################################
+-- ## 0051_notification_push.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0051 Every portal notification on the phone, app closed
+--
+-- Notifications (new, changed and cancelled bookings; tickets) showed only
+-- inside the portal. Now each one is also pushed to the recipient's devices
+-- as a phone notification - a banner like any app's - for staff and owners.
+-- The check-out / check-in alarms (0043) stay with super admins and
+-- housekeeping.
+--
+--   * save_push_subscription(): any signed-in account may turn notifications
+--     on for its device, owners included (0043 allowed staff only).
+--   * notifications.pushed_at: when it went to the phones. Rows from before
+--     this migration count as sent, so turning it on sends no backlog.
+--   * claim_notification_pushes(): marks the unsent notifications sent and
+--     returns each with its recipient's devices, in one step, so two runs
+--     never push the same one twice. Server only.
+-- ============================================================================
+
+alter table notifications add column if not exists pushed_at timestamptz;
+update notifications set pushed_at = coalesce(pushed_at, created_at) where pushed_at is null;
+create index if not exists notifications_unpushed_idx on notifications (created_at) where pushed_at is null;
+
+create or replace function save_push_subscription(p_endpoint text, p_p256dh text, p_auth text, p_user_agent text)
+returns void
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+begin
+  if auth.uid() is null or not exists (select 1 from profiles where id = auth.uid() and is_active) then
+    raise exception 'Sign in to turn on notifications' using errcode = 'insufficient_privilege';
+  end if;
+  if p_endpoint !~ '^https://' then
+    raise exception 'Not a push address' using errcode = 'invalid_parameter_value';
+  end if;
+  insert into push_subscriptions (profile_id, endpoint, p256dh, auth, user_agent)
+  values (auth.uid(), p_endpoint, p_p256dh, p_auth, left(p_user_agent, 300))
+  on conflict (endpoint) do update
+     set profile_id = excluded.profile_id, p256dh = excluded.p256dh,
+         auth = excluded.auth, user_agent = excluded.user_agent;
+end;
+$$;
+
+create or replace function claim_notification_pushes()
+returns table (
+  notification_id uuid,
+  title text,
+  body text,
+  link text,
+  subscription_id uuid,
+  endpoint text,
+  p256dh text,
+  auth text
+)
+language sql
+volatile
+security definer
+set search_path = public, pms
+as $$
+  with claimed as (
+    update notifications n
+       set pushed_at = now()
+     where n.pushed_at is null
+       -- Older than a day is no longer news.
+       and n.created_at > now() - interval '1 day'
+    returning n.id, n.recipient_id, n.title, n.body, n.link
+  )
+  select c.id, c.title, c.body, c.link, s.id, s.endpoint, s.p256dh, s.auth
+    from claimed c
+    join profiles p on p.id = c.recipient_id and p.is_active
+    join push_subscriptions s on s.profile_id = c.recipient_id;
+$$;
+
+revoke all on function claim_notification_pushes() from public, anon, authenticated;
+grant execute on function claim_notification_pushes() to service_role;
+
+-- ####################################################################
+-- ## 0052_refunds.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0052 Refunds: office costs staff paid out of their own pocket
+--
+-- Someone buys something for the office with their own money and claims it
+-- back. Every staff member sees the list and can add a claim: who paid, what
+-- for, how much, the receipt photo. Super admins mark it refunded (or
+-- rejected). A new claim notifies the super admins and finance - in the
+-- portal and on their phones (0051) - and a settled one notifies whoever
+-- added it.
+-- ============================================================================
+
+create table if not exists refunds (
+  id           uuid primary key default gen_random_uuid(),
+  spent_by     text not null check (length(trim(spent_by)) between 2 and 60),
+  description  text not null check (length(trim(description)) between 2 and 500),
+  amount_aed   numeric(12,2) not null check (amount_aed > 0 and amount_aed < 1000000),
+  spent_on     date not null default ((now() at time zone 'Asia/Dubai')::date),
+  -- In the private documents bucket: refund/<id>/<file>; staff only (0011).
+  receipt_path text,
+  status       text not null default 'pending' check (status in ('pending', 'refunded', 'rejected')),
+  settled_on   date,
+  settled_by   uuid references profiles(id) on delete set null,
+  settle_note  text check (settle_note is null or length(settle_note) <= 300),
+  created_by   uuid references profiles(id) on delete set null default auth.uid(),
+  created_at   timestamptz not null default now()
+);
+
+create index if not exists refunds_status_idx on refunds (status, created_at desc);
+
+comment on table refunds is
+  'Office costs a staff member paid personally and claims back. Staff only.';
+
+alter table refunds enable row level security;
+
+drop policy if exists refunds_staff_read on refunds;
+create policy refunds_staff_read on refunds
+  for select to authenticated
+  using (pms.is_staff());
+
+drop policy if exists refunds_staff_add on refunds;
+create policy refunds_staff_add on refunds
+  for insert to authenticated
+  with check (pms.is_staff() and created_by = auth.uid() and status = 'pending');
+
+-- Super admins settle any claim; whoever added a claim may correct it (its
+-- receipt, amount, wording) while it is still pending.
+drop policy if exists refunds_update on refunds;
+create policy refunds_update on refunds
+  for update to authenticated
+  using (pms.is_admin() or (created_by = auth.uid() and status = 'pending'))
+  with check (pms.is_admin() or (created_by = auth.uid() and status = 'pending'));
+
+drop policy if exists refunds_admin_delete on refunds;
+create policy refunds_admin_delete on refunds
+  for delete to authenticated
+  using (pms.is_admin());
+
+
+-- ---------------------------------------------------------------------------
+-- Notifications
+-- ---------------------------------------------------------------------------
+alter table notifications drop constraint if exists notifications_kind_check;
+alter table notifications add constraint notifications_kind_check
+  check (kind in ('booking_new', 'booking_changed', 'booking_cancelled',
+                  'ticket_new', 'ticket_status', 'refund_new', 'refund_settled'));
+
+create or replace function pms.notify_refund_event()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_actor  uuid := auth.uid();
+  v_amount text := 'AED ' || to_char(new.amount_aed, 'FM999,999,990.00');
+begin
+  if tg_op = 'INSERT' then
+    insert into notifications (recipient_id, kind, title, body, link)
+    select p.id, 'refund_new',
+           'Refund claim: ' || v_amount,
+           new.spent_by || ' paid for ' || new.description,
+           '/refunds'
+      from profiles p
+     where p.is_active
+       and p.role in ('super_admin', 'finance')
+       and p.id is distinct from v_actor;
+  elsif new.status <> old.status and new.status in ('refunded', 'rejected')
+        and new.created_by is not null and new.created_by is distinct from v_actor then
+    insert into notifications (recipient_id, kind, title, body, link)
+    values (new.created_by, 'refund_settled',
+            case new.status when 'refunded' then 'Refunded: ' else 'Refund declined: ' end || v_amount,
+            new.spent_by || ' - ' || new.description
+              || coalesce(' (' || nullif(trim(new.settle_note), '') || ')', ''),
+            '/refunds');
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists refunds_notify on refunds;
+create trigger refunds_notify
+  after insert or update of status on refunds
+  for each row execute function pms.notify_refund_event();
+
+-- ####################################################################
+-- ## 0053_ticket_photos.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0053 Photos on repairs and complaints
+--
+-- A ticket now carries photos: staff add them in the back office, owners in
+-- their portal, when reporting an issue or later on its page. The files are
+-- in the private documents bucket under ticket/<ticket id>/; the server
+-- shows them through short-lived links to whoever may read the ticket.
+--
+--   * maintenance_requests.photo_paths: the ticket's photos, oldest first.
+--   * add_ticket_photo(): adds one to a ticket the caller may read (staff on
+--     their units, owners on their own), up to 12. Removing one is for super
+--     admins, as with every other file in the vault.
+--   * guard_owner_ticket_update() (0019) lets an owner's ticket change only
+--     their approval decision; it now also lets through a photo that
+--     add_ticket_photo() is adding, and nothing else.
+-- ============================================================================
+
+-- Nullable on purpose: a row restored from the audit log (from before this
+-- migration) carries no value; the app reads null as no photos.
+alter table maintenance_requests add column if not exists photo_paths text[] default '{}';
+
+create or replace function add_ticket_photo(p_ticket_id uuid, p_path text)
+returns void
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_unit   uuid;
+  v_photos text[];
+begin
+  select unit_id, coalesce(photo_paths, '{}') into v_unit, v_photos
+    from maintenance_requests where id = p_ticket_id for update;
+  if v_unit is null or not pms.can_read_unit(v_unit) then
+    raise exception 'Ticket not found' using errcode = 'insufficient_privilege';
+  end if;
+  if p_path !~ ('^ticket/' || p_ticket_id::text || '/[^/]+$') then
+    raise exception 'Not a photo of this ticket' using errcode = 'invalid_parameter_value';
+  end if;
+  if cardinality(v_photos) >= 12 then
+    raise exception 'A ticket holds up to 12 photos' using errcode = 'check_violation';
+  end if;
+  -- Tells the owner guard below this is the photo being added.
+  perform set_config('pms.adding_ticket_photo', p_ticket_id::text, true);
+  update maintenance_requests set photo_paths = v_photos || p_path where id = p_ticket_id;
+  perform set_config('pms.adding_ticket_photo', '', true);
+end;
+$$;
+
+revoke all on function add_ticket_photo(uuid, text) from public, anon;
+grant execute on function add_ticket_photo(uuid, text) to authenticated;
+
+-- As 0019, plus the photo add_ticket_photo() is adding.
+create or replace function pms.guard_owner_ticket_update()
+returns trigger
+language plpgsql
+set search_path = public, pms
+as $$
+declare
+  c_decision constant text[] := array[
+    'status', 'owner_approved_at', 'owner_approved_by', 'approved_amount_aed',
+    'owner_rejected_at', 'owner_rejection_reason', 'updated_at'];
+begin
+  if pms.is_staff() or auth.uid() is null then
+    return new;
+  end if;
+
+  if current_setting('pms.adding_ticket_photo', true) = new.id::text
+     and (to_jsonb(new) - 'photo_paths' - 'updated_at') = (to_jsonb(old) - 'photo_paths' - 'updated_at') then
+    return new;
+  end if;
+
+  if (to_jsonb(new) - c_decision) is distinct from (to_jsonb(old) - c_decision)
+     or new.status not in ('approved', 'rejected')
+     or (new.owner_approved_by is not null and new.owner_approved_by <> auth.uid()) then
+    raise exception 'Owners can only approve or decline a quote'
+      using errcode = 'insufficient_privilege';
+  end if;
+  return new;
+end;
+$$;
+
+-- ####################################################################
+-- ## 0054_statement_fees.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0054 Statement fees set when generating; voiding frees the lines
+--
+-- The management fee differs from owner to owner, so finance sets it on each
+-- statement: generate_owner_statement() takes the fee as a percentage of the
+-- period's income (with or without VAT on it) and an "other fees" amount with
+-- what it is for. Without a percentage it falls back to the unit's
+-- management agreement, as before (0011).
+--
+-- The arithmetic, in AED to the fils:
+--   income      = sum of the period's income lines
+--   expenses    = sum of the period's expense lines (with their VAT)
+--   fee         = round(income x percentage / 100, 2)
+--   VAT on fee  = round(fee x VAT rate, 2), when applied
+--   other fees  = as entered
+--   net payout  = income - expenses - fee - VAT on fee - other fees
+--
+-- Voiding a statement also frees its ledger lines and its owner and period,
+-- so a corrected statement can be generated in its place. 0011 left both
+-- taken: the replacement found no income, and the unique owner + period
+-- refused it outright.
+-- ============================================================================
+
+alter table owner_statements
+  add column if not exists management_fee_pct numeric(5,2)
+    check (management_fee_pct is null or management_fee_pct between 0 and 100),
+  add column if not exists fee_vat_applied boolean,
+  add column if not exists other_fees_aed numeric(14,2) not null default 0
+    check (other_fees_aed >= 0),
+  add column if not exists other_fees_note text
+    check (other_fees_note is null or length(other_fees_note) <= 200);
+
+comment on column owner_statements.management_fee_pct is
+  'The management fee finance set for this statement, as % of its income; null when it came from the agreements.';
+comment on column owner_statements.other_fees_aed is
+  'Other fees deducted on this statement, as entered when it was generated.';
+
+-- One live statement per owner and period; void ones do not count.
+alter table owner_statements drop constraint if exists owner_statements_owner_id_period_start_period_end_key;
+create unique index if not exists owner_statements_live_period_idx
+  on owner_statements (owner_id, period_start, period_end)
+  where status <> 'void';
+
+create or replace function pms.release_void_statement()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+begin
+  if old.status = 'void' and new.status <> 'void' then
+    raise exception 'A void statement stays void; generate a new one'
+      using errcode = 'check_violation';
+  end if;
+  if new.status = 'void' and old.status <> 'void' then
+    update ledger_entries set statement_id = null where statement_id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists owner_statements_release_void on owner_statements;
+create trigger owner_statements_release_void
+  before update of status on owner_statements
+  for each row execute function pms.release_void_statement();
+
+-- Lines of statements voided before this migration: free them too, unless
+-- a live statement holds them.
+update ledger_entries le
+   set statement_id = null
+  from owner_statements os
+ where os.id = le.statement_id
+   and os.status = 'void';
+
+
+-- ---------------------------------------------------------------------------
+-- generate_owner_statement: as 0011, with the fee and other fees given.
+-- ---------------------------------------------------------------------------
+drop function if exists generate_owner_statement(uuid, date, date);
+
+create or replace function generate_owner_statement(
+  p_owner_id        uuid,
+  p_period_start    date,
+  p_period_end      date,
+  p_fee_pct         numeric default null,
+  p_fee_vat         boolean default true,
+  p_other_fees      numeric default 0,
+  p_other_fees_note text default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_statement_id uuid;
+  v_income   numeric(14,2) := 0;
+  v_expense  numeric(14,2) := 0;
+  v_fee      numeric(14,2) := 0;
+  v_fee_vat  numeric(14,2) := 0;
+  v_other    numeric(14,2) := round(coalesce(p_other_fees, 0), 2);
+  v_vat_rate numeric(5,4);
+  v_sort     integer := 0;
+  r          record;
+begin
+  if not pms.is_staff() and auth.uid() is not null then
+    raise exception 'Only staff can generate statements' using errcode = 'insufficient_privilege';
+  end if;
+  if p_fee_pct is not null and (p_fee_pct < 0 or p_fee_pct > 100) then
+    raise exception 'The management fee must be between 0%% and 100%%' using errcode = 'check_violation';
+  end if;
+  if v_other < 0 then
+    raise exception 'Other fees cannot be negative' using errcode = 'check_violation';
+  end if;
+
+  select coalesce(vat_rate, 0) into v_vat_rate from company_settings where id;
+  v_vat_rate := coalesce(v_vat_rate, 0);
+
+  if exists (
+    select 1 from owner_statements
+    where owner_id = p_owner_id
+      and period_start = p_period_start
+      and period_end = p_period_end
+      and status <> 'void'
+  ) then
+    raise exception 'A statement already exists for this owner and period';
+  end if;
+
+  insert into owner_statements (owner_id, period_start, period_end, status, created_by,
+                                management_fee_pct, fee_vat_applied, other_fees_aed, other_fees_note)
+  values (p_owner_id, p_period_start, p_period_end, 'draft', auth.uid(),
+          p_fee_pct, case when p_fee_pct is not null then p_fee_vat end, v_other,
+          nullif(trim(p_other_fees_note), ''))
+  returning id into v_statement_id;
+
+  -- Snapshot every ledger entry on this owner's units for the period that has
+  -- not already been carried on another statement.
+  for r in
+    select le.*, gc.code as category_code, gc.affects_owner_statement,
+           u.unit_number, p.name as property_name
+    from ledger_entries le
+    join gl_categories gc on gc.id = le.category_id
+    left join units u on u.id = le.unit_id
+    left join properties p on p.id = u.property_id
+    where le.owner_id = p_owner_id
+      and le.entry_date between p_period_start and p_period_end
+      and le.statement_id is null
+      and le.is_owner_visible
+      and gc.affects_owner_statement
+      and gc.code <> 'EXP-MGMT-FEE'      -- the fee is computed below, not copied
+    order by le.entry_date, le.created_at
+  loop
+    v_sort := v_sort + 1;
+
+    insert into owner_statement_lines (
+      statement_id, ledger_entry_id, unit_id, unit_label, entry_date,
+      category_code, description, direction, amount_aed, vat_amount_aed,
+      total_aed, sort_order
+    ) values (
+      v_statement_id, r.id, r.unit_id,
+      coalesce(r.property_name || ' - ' || r.unit_number, 'Portfolio'),
+      r.entry_date, r.category_code, r.description, r.direction,
+      r.amount_aed, r.vat_amount_aed, r.total_aed, v_sort
+    );
+
+    update ledger_entries set statement_id = v_statement_id where id = r.id;
+
+    if r.direction = 'income' then
+      v_income := v_income + r.amount_aed;
+    else
+      v_expense := v_expense + r.total_aed;
+    end if;
+  end loop;
+
+  if p_fee_pct is not null then
+    -- The fee finance set: one line on the period's whole income.
+    v_fee     := round(v_income * p_fee_pct / 100.0, 2);
+    v_fee_vat := case when p_fee_vat then round(v_fee * v_vat_rate, 2) else 0 end;
+    if v_fee > 0 then
+      v_sort := v_sort + 1;
+      insert into owner_statement_lines (
+        statement_id, unit_label, entry_date, category_code,
+        description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+      ) values (
+        v_statement_id, 'Portfolio', p_period_end, 'EXP-MGMT-FEE',
+        'Management fee (' || rtrim(rtrim(p_fee_pct::text, '0'), '.') || '% of AED '
+          || to_char(v_income, 'FM999,999,990.00') || ')',
+        'expense', v_fee, v_fee_vat, v_fee + v_fee_vat, v_sort
+      );
+    end if;
+  else
+    -- Management fee, per unit, from the agreement in force during the period.
+    for r in
+      select ma.unit_id, ma.commission_pct, ma.fixed_fee_aed, ma.fee_vat_applicable,
+             u.unit_number, p.name as property_name,
+             coalesce(sum(le.amount_aed) filter (where le.direction = 'income'), 0) as unit_income
+      from management_agreements ma
+      join units u on u.id = ma.unit_id
+      join properties p on p.id = u.property_id
+      left join ledger_entries le
+        on le.unit_id = ma.unit_id
+       and le.statement_id = v_statement_id
+       and le.direction = 'income'
+      where ma.owner_id = p_owner_id
+        and ma.is_active
+        and ma.start_date <= p_period_end
+        and ma.end_date >= p_period_start
+      group by ma.unit_id, ma.commission_pct, ma.fixed_fee_aed, ma.fee_vat_applicable,
+               u.unit_number, p.name
+    loop
+      declare
+        line_fee numeric(14,2);
+        line_vat numeric(14,2);
+      begin
+        if r.commission_pct is not null then
+          line_fee := round(r.unit_income * r.commission_pct / 100.0, 2);
+        else
+          line_fee := coalesce(r.fixed_fee_aed, 0);
+        end if;
+
+        if line_fee <= 0 then
+          continue;
+        end if;
+
+        -- Management fee is a taxable supply of services: VAT normally applies.
+        line_vat := case when r.fee_vat_applicable then round(line_fee * v_vat_rate, 2) else 0 end;
+
+        v_fee     := v_fee + line_fee;
+        v_fee_vat := v_fee_vat + line_vat;
+        v_sort    := v_sort + 1;
+
+        insert into owner_statement_lines (
+          statement_id, unit_id, unit_label, entry_date, category_code,
+          description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+        ) values (
+          v_statement_id, r.unit_id, r.property_name || ' - ' || r.unit_number,
+          p_period_end, 'EXP-MGMT-FEE',
+          case when r.commission_pct is not null
+            then 'Management fee (' || r.commission_pct || '% of AED ' || r.unit_income || ')'
+            else 'Management fee (fixed)' end,
+          'expense', line_fee, line_vat, line_fee + line_vat, v_sort
+        );
+      end;
+    end loop;
+  end if;
+
+  -- Other fees, as entered.
+  if v_other > 0 then
+    v_sort := v_sort + 1;
+    insert into owner_statement_lines (
+      statement_id, unit_label, entry_date, category_code,
+      description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+    ) values (
+      v_statement_id, 'Portfolio', p_period_end, 'EXP-OTHER-FEES',
+      coalesce('Other fees: ' || nullif(trim(p_other_fees_note), ''), 'Other fees'),
+      'expense', v_other, 0, v_other, v_sort
+    );
+  end if;
+
+  update owner_statements
+     set gross_income_aed   = v_income,
+         total_expenses_aed = v_expense,
+         management_fee_aed = v_fee,
+         vat_total_aed      = v_fee_vat,
+         other_fees_aed     = v_other,
+         net_payout_aed     = v_income - v_expense - v_fee - v_fee_vat - v_other,
+         closing_balance_aed = v_income - v_expense - v_fee - v_fee_vat - v_other
+   where id = v_statement_id;
+
+  return v_statement_id;
+end;
+$$;
+
+revoke all on function generate_owner_statement(uuid, date, date, numeric, boolean, numeric, text) from public, anon;
+grant execute on function generate_owner_statement(uuid, date, date, numeric, boolean, numeric, text) to authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- Deleting a statement: one account only (dulshan@dubairapidproperties.com).
+-- Its lines go with it and its ledger lines are freed for a new statement
+-- (ledger_entries.statement_id is "on delete set null").
+-- ---------------------------------------------------------------------------
+create or replace function pms.can_delete_statements()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pms
+as $$
+  select exists (
+    select 1 from profiles
+     where id = auth.uid() and is_active
+       and lower(email) = 'dulshan@dubairapidproperties.com'
+  );
+$$;
+
+create or replace function delete_owner_statement(p_statement_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+begin
+  if not pms.can_delete_statements() then
+    raise exception 'Only dulshan@dubairapidproperties.com can delete a statement'
+      using errcode = 'insufficient_privilege';
+  end if;
+  update ledger_entries set statement_id = null where statement_id = p_statement_id;
+  delete from owner_statements where id = p_statement_id;
+  if not found then
+    raise exception 'Statement not found' using errcode = 'no_data_found';
+  end if;
+end;
+$$;
+
+revoke all on function delete_owner_statement(uuid) from public, anon;
+grant execute on function delete_owner_statement(uuid) to authenticated;
+
+-- ####################################################################
+-- ## 0055_statement_other_fees.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0055 Other fees item by item
+--
+-- Other fees on a statement are now a list: what each is for and its amount
+-- (DEWA AED 437.19, Etisalat AED 479.94 ...), each its own line on the
+-- statement under its own name, with the expenses - not one lump called
+-- "Other fees". Their sum is kept in owner_statements.other_fees_aed and
+-- comes off the net payout as before (0054):
+--   net payout = income - expenses - fee - VAT on the fee - other fees
+-- ============================================================================
+
+drop function if exists generate_owner_statement(uuid, date, date, numeric, boolean, numeric, text);
+
+create or replace function generate_owner_statement(
+  p_owner_id        uuid,
+  p_period_start    date,
+  p_period_end      date,
+  p_fee_pct         numeric default null,
+  p_fee_vat         boolean default true,
+  p_other_items     jsonb default '[]'::jsonb
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_statement_id uuid;
+  v_income   numeric(14,2) := 0;
+  v_expense  numeric(14,2) := 0;
+  v_fee      numeric(14,2) := 0;
+  v_fee_vat  numeric(14,2) := 0;
+  v_other    numeric(14,2) := 0;
+  v_items    jsonb := coalesce(p_other_items, '[]'::jsonb);
+  v_item     jsonb;
+  v_amount   numeric(14,2);
+  v_vat_rate numeric(5,4);
+  v_sort     integer := 0;
+  r          record;
+begin
+  if not pms.is_staff() and auth.uid() is not null then
+    raise exception 'Only staff can generate statements' using errcode = 'insufficient_privilege';
+  end if;
+  if p_fee_pct is not null and (p_fee_pct < 0 or p_fee_pct > 100) then
+    raise exception 'The management fee must be between 0%% and 100%%' using errcode = 'check_violation';
+  end if;
+  if jsonb_typeof(v_items) <> 'array' then
+    raise exception 'Other fees must be a list' using errcode = 'invalid_parameter_value';
+  end if;
+  for v_item in select * from jsonb_array_elements(v_items) loop
+    if length(trim(coalesce(v_item->>'description', ''))) not between 1 and 200
+       or (v_item->>'amount') is null or (v_item->>'amount')::numeric <= 0 then
+      raise exception 'Each other fee needs what it is for and an amount above 0'
+        using errcode = 'check_violation';
+    end if;
+  end loop;
+
+  select coalesce(vat_rate, 0) into v_vat_rate from company_settings where id;
+  v_vat_rate := coalesce(v_vat_rate, 0);
+
+  if exists (
+    select 1 from owner_statements
+    where owner_id = p_owner_id
+      and period_start = p_period_start
+      and period_end = p_period_end
+      and status <> 'void'
+  ) then
+    raise exception 'A statement already exists for this owner and period';
+  end if;
+
+  insert into owner_statements (owner_id, period_start, period_end, status, created_by,
+                                management_fee_pct, fee_vat_applied, other_fees_aed, other_fees_note)
+  values (p_owner_id, p_period_start, p_period_end, 'draft', auth.uid(),
+          p_fee_pct, case when p_fee_pct is not null then p_fee_vat end, 0, null)
+  returning id into v_statement_id;
+
+  -- Snapshot every ledger entry on this owner's units for the period that has
+  -- not already been carried on another statement.
+  for r in
+    select le.*, gc.code as category_code, gc.affects_owner_statement,
+           u.unit_number, p.name as property_name
+    from ledger_entries le
+    join gl_categories gc on gc.id = le.category_id
+    left join units u on u.id = le.unit_id
+    left join properties p on p.id = u.property_id
+    where le.owner_id = p_owner_id
+      and le.entry_date between p_period_start and p_period_end
+      and le.statement_id is null
+      and le.is_owner_visible
+      and gc.affects_owner_statement
+      and gc.code <> 'EXP-MGMT-FEE'      -- the fee is computed below, not copied
+    order by le.entry_date, le.created_at
+  loop
+    v_sort := v_sort + 1;
+
+    insert into owner_statement_lines (
+      statement_id, ledger_entry_id, unit_id, unit_label, entry_date,
+      category_code, description, direction, amount_aed, vat_amount_aed,
+      total_aed, sort_order
+    ) values (
+      v_statement_id, r.id, r.unit_id,
+      coalesce(r.property_name || ' - ' || r.unit_number, 'Portfolio'),
+      r.entry_date, r.category_code, r.description, r.direction,
+      r.amount_aed, r.vat_amount_aed, r.total_aed, v_sort
+    );
+
+    update ledger_entries set statement_id = v_statement_id where id = r.id;
+
+    if r.direction = 'income' then
+      v_income := v_income + r.amount_aed;
+    else
+      v_expense := v_expense + r.total_aed;
+    end if;
+  end loop;
+
+  if p_fee_pct is not null then
+    -- The fee finance set: one line on the period's whole income.
+    v_fee     := round(v_income * p_fee_pct / 100.0, 2);
+    v_fee_vat := case when p_fee_vat then round(v_fee * v_vat_rate, 2) else 0 end;
+    if v_fee > 0 then
+      v_sort := v_sort + 1;
+      insert into owner_statement_lines (
+        statement_id, unit_label, entry_date, category_code,
+        description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+      ) values (
+        v_statement_id, 'Portfolio', p_period_end, 'EXP-MGMT-FEE',
+        'Management fee (' || rtrim(rtrim(p_fee_pct::text, '0'), '.') || '% of AED '
+          || to_char(v_income, 'FM999,999,990.00') || ')',
+        'expense', v_fee, v_fee_vat, v_fee + v_fee_vat, v_sort
+      );
+    end if;
+  else
+    -- Management fee, per unit, from the agreement in force during the period.
+    for r in
+      select ma.unit_id, ma.commission_pct, ma.fixed_fee_aed, ma.fee_vat_applicable,
+             u.unit_number, p.name as property_name,
+             coalesce(sum(le.amount_aed) filter (where le.direction = 'income'), 0) as unit_income
+      from management_agreements ma
+      join units u on u.id = ma.unit_id
+      join properties p on p.id = u.property_id
+      left join ledger_entries le
+        on le.unit_id = ma.unit_id
+       and le.statement_id = v_statement_id
+       and le.direction = 'income'
+      where ma.owner_id = p_owner_id
+        and ma.is_active
+        and ma.start_date <= p_period_end
+        and ma.end_date >= p_period_start
+      group by ma.unit_id, ma.commission_pct, ma.fixed_fee_aed, ma.fee_vat_applicable,
+               u.unit_number, p.name
+    loop
+      declare
+        line_fee numeric(14,2);
+        line_vat numeric(14,2);
+      begin
+        if r.commission_pct is not null then
+          line_fee := round(r.unit_income * r.commission_pct / 100.0, 2);
+        else
+          line_fee := coalesce(r.fixed_fee_aed, 0);
+        end if;
+
+        if line_fee <= 0 then
+          continue;
+        end if;
+
+        -- Management fee is a taxable supply of services: VAT normally applies.
+        line_vat := case when r.fee_vat_applicable then round(line_fee * v_vat_rate, 2) else 0 end;
+
+        v_fee     := v_fee + line_fee;
+        v_fee_vat := v_fee_vat + line_vat;
+        v_sort    := v_sort + 1;
+
+        insert into owner_statement_lines (
+          statement_id, unit_id, unit_label, entry_date, category_code,
+          description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+        ) values (
+          v_statement_id, r.unit_id, r.property_name || ' - ' || r.unit_number,
+          p_period_end, 'EXP-MGMT-FEE',
+          case when r.commission_pct is not null
+            then 'Management fee (' || r.commission_pct || '% of AED ' || r.unit_income || ')'
+            else 'Management fee (fixed)' end,
+          'expense', line_fee, line_vat, line_fee + line_vat, v_sort
+        );
+      end;
+    end loop;
+  end if;
+
+  -- Other fees, one line each, as entered: on the statement under their own
+  -- names, with the expenses.
+  for v_item in select * from jsonb_array_elements(v_items) loop
+    v_amount := round((v_item->>'amount')::numeric, 2);
+    v_other  := v_other + v_amount;
+    v_sort   := v_sort + 1;
+    insert into owner_statement_lines (
+      statement_id, unit_label, entry_date, category_code,
+      description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+    ) values (
+      v_statement_id, 'Portfolio', p_period_end, 'EXP-OTHER-FEES',
+      trim(v_item->>'description'), 'expense', v_amount, 0, v_amount, v_sort
+    );
+  end loop;
+
+  update owner_statements
+     set gross_income_aed   = v_income,
+         total_expenses_aed = v_expense,
+         management_fee_aed = v_fee,
+         vat_total_aed      = v_fee_vat,
+         other_fees_aed     = v_other,
+         net_payout_aed     = v_income - v_expense - v_fee - v_fee_vat - v_other,
+         closing_balance_aed = v_income - v_expense - v_fee - v_fee_vat - v_other
+   where id = v_statement_id;
+
+  return v_statement_id;
+end;
+$$;
+
+revoke all on function generate_owner_statement(uuid, date, date, numeric, boolean, jsonb) from public, anon;
+grant execute on function generate_owner_statement(uuid, date, date, numeric, boolean, jsonb) to authenticated;
+
+-- ####################################################################
+-- ## 0056_statement_other_charges.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0056 Other fees: deducted, not itemised for the owner
+--
+-- Besides the utility fees (0055, each its own line with the expenses), a
+-- statement can carry other fees: what each is for and its amount, entered
+-- when generating. They come off the net payout; the owner's statement shows
+-- only their sum, as one "Other charges" line, and never what they were for.
+-- The list stays on the statement for staff (owner_statements.other_charges).
+--
+--   net payout = income - expenses - fee - VAT on the fee
+--                - utility fees - other fees
+-- ============================================================================
+
+alter table owner_statements
+  add column if not exists other_charges_aed numeric(14,2) not null default 0
+    check (other_charges_aed >= 0),
+  add column if not exists other_charges jsonb not null default '[]'::jsonb;
+
+comment on column owner_statements.other_charges_aed is
+  'Other fees deducted on this statement; the owner sees only this sum, as "Other charges".';
+comment on column owner_statements.other_charges is
+  'What each other fee was for, with its amount: for staff only, never on the owner''s statement.';
+
+drop function if exists generate_owner_statement(uuid, date, date, numeric, boolean, jsonb);
+
+create or replace function generate_owner_statement(
+  p_owner_id        uuid,
+  p_period_start    date,
+  p_period_end      date,
+  p_fee_pct         numeric default null,
+  p_fee_vat         boolean default true,
+  p_other_items     jsonb default '[]'::jsonb,
+  p_other_charges   jsonb default '[]'::jsonb
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_statement_id uuid;
+  v_income   numeric(14,2) := 0;
+  v_expense  numeric(14,2) := 0;
+  v_fee      numeric(14,2) := 0;
+  v_fee_vat  numeric(14,2) := 0;
+  v_other    numeric(14,2) := 0;
+  v_items    jsonb := coalesce(p_other_items, '[]'::jsonb);
+  v_item     jsonb;
+  v_amount   numeric(14,2);
+  v_charges  jsonb := coalesce(p_other_charges, '[]'::jsonb);
+  v_hidden   numeric(14,2) := 0;
+  v_vat_rate numeric(5,4);
+  v_sort     integer := 0;
+  r          record;
+begin
+  if not pms.is_staff() and auth.uid() is not null then
+    raise exception 'Only staff can generate statements' using errcode = 'insufficient_privilege';
+  end if;
+  if p_fee_pct is not null and (p_fee_pct < 0 or p_fee_pct > 100) then
+    raise exception 'The management fee must be between 0%% and 100%%' using errcode = 'check_violation';
+  end if;
+  if jsonb_typeof(v_charges) <> 'array' then
+    raise exception 'Other fees must be a list' using errcode = 'invalid_parameter_value';
+  end if;
+  for v_item in select * from jsonb_array_elements(v_charges) loop
+    if length(trim(coalesce(v_item->>'description', ''))) not between 1 and 200
+       or (v_item->>'amount') is null or (v_item->>'amount')::numeric <= 0 then
+      raise exception 'Each other fee needs what it is for and an amount above 0'
+        using errcode = 'check_violation';
+    end if;
+    v_hidden := v_hidden + round((v_item->>'amount')::numeric, 2);
+  end loop;
+
+  if jsonb_typeof(v_items) <> 'array' then
+    raise exception 'Other fees must be a list' using errcode = 'invalid_parameter_value';
+  end if;
+  for v_item in select * from jsonb_array_elements(v_items) loop
+    if length(trim(coalesce(v_item->>'description', ''))) not between 1 and 200
+       or (v_item->>'amount') is null or (v_item->>'amount')::numeric <= 0 then
+      raise exception 'Each other fee needs what it is for and an amount above 0'
+        using errcode = 'check_violation';
+    end if;
+  end loop;
+
+  select coalesce(vat_rate, 0) into v_vat_rate from company_settings where id;
+  v_vat_rate := coalesce(v_vat_rate, 0);
+
+  if exists (
+    select 1 from owner_statements
+    where owner_id = p_owner_id
+      and period_start = p_period_start
+      and period_end = p_period_end
+      and status <> 'void'
+  ) then
+    raise exception 'A statement already exists for this owner and period';
+  end if;
+
+  insert into owner_statements (owner_id, period_start, period_end, status, created_by,
+                                management_fee_pct, fee_vat_applied, other_fees_aed, other_fees_note)
+  values (p_owner_id, p_period_start, p_period_end, 'draft', auth.uid(),
+          p_fee_pct, case when p_fee_pct is not null then p_fee_vat end, 0, null)
+  returning id into v_statement_id;
+
+  -- Snapshot every ledger entry on this owner's units for the period that has
+  -- not already been carried on another statement.
+  for r in
+    select le.*, gc.code as category_code, gc.affects_owner_statement,
+           u.unit_number, p.name as property_name
+    from ledger_entries le
+    join gl_categories gc on gc.id = le.category_id
+    left join units u on u.id = le.unit_id
+    left join properties p on p.id = u.property_id
+    where le.owner_id = p_owner_id
+      and le.entry_date between p_period_start and p_period_end
+      and le.statement_id is null
+      and le.is_owner_visible
+      and gc.affects_owner_statement
+      and gc.code <> 'EXP-MGMT-FEE'      -- the fee is computed below, not copied
+    order by le.entry_date, le.created_at
+  loop
+    v_sort := v_sort + 1;
+
+    insert into owner_statement_lines (
+      statement_id, ledger_entry_id, unit_id, unit_label, entry_date,
+      category_code, description, direction, amount_aed, vat_amount_aed,
+      total_aed, sort_order
+    ) values (
+      v_statement_id, r.id, r.unit_id,
+      coalesce(r.property_name || ' - ' || r.unit_number, 'Portfolio'),
+      r.entry_date, r.category_code, r.description, r.direction,
+      r.amount_aed, r.vat_amount_aed, r.total_aed, v_sort
+    );
+
+    update ledger_entries set statement_id = v_statement_id where id = r.id;
+
+    if r.direction = 'income' then
+      v_income := v_income + r.amount_aed;
+    else
+      v_expense := v_expense + r.total_aed;
+    end if;
+  end loop;
+
+  if p_fee_pct is not null then
+    -- The fee finance set: one line on the period's whole income.
+    v_fee     := round(v_income * p_fee_pct / 100.0, 2);
+    v_fee_vat := case when p_fee_vat then round(v_fee * v_vat_rate, 2) else 0 end;
+    if v_fee > 0 then
+      v_sort := v_sort + 1;
+      insert into owner_statement_lines (
+        statement_id, unit_label, entry_date, category_code,
+        description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+      ) values (
+        v_statement_id, 'Portfolio', p_period_end, 'EXP-MGMT-FEE',
+        'Management fee (' || rtrim(rtrim(p_fee_pct::text, '0'), '.') || '% of AED '
+          || to_char(v_income, 'FM999,999,990.00') || ')',
+        'expense', v_fee, v_fee_vat, v_fee + v_fee_vat, v_sort
+      );
+    end if;
+  else
+    -- Management fee, per unit, from the agreement in force during the period.
+    for r in
+      select ma.unit_id, ma.commission_pct, ma.fixed_fee_aed, ma.fee_vat_applicable,
+             u.unit_number, p.name as property_name,
+             coalesce(sum(le.amount_aed) filter (where le.direction = 'income'), 0) as unit_income
+      from management_agreements ma
+      join units u on u.id = ma.unit_id
+      join properties p on p.id = u.property_id
+      left join ledger_entries le
+        on le.unit_id = ma.unit_id
+       and le.statement_id = v_statement_id
+       and le.direction = 'income'
+      where ma.owner_id = p_owner_id
+        and ma.is_active
+        and ma.start_date <= p_period_end
+        and ma.end_date >= p_period_start
+      group by ma.unit_id, ma.commission_pct, ma.fixed_fee_aed, ma.fee_vat_applicable,
+               u.unit_number, p.name
+    loop
+      declare
+        line_fee numeric(14,2);
+        line_vat numeric(14,2);
+      begin
+        if r.commission_pct is not null then
+          line_fee := round(r.unit_income * r.commission_pct / 100.0, 2);
+        else
+          line_fee := coalesce(r.fixed_fee_aed, 0);
+        end if;
+
+        if line_fee <= 0 then
+          continue;
+        end if;
+
+        -- Management fee is a taxable supply of services: VAT normally applies.
+        line_vat := case when r.fee_vat_applicable then round(line_fee * v_vat_rate, 2) else 0 end;
+
+        v_fee     := v_fee + line_fee;
+        v_fee_vat := v_fee_vat + line_vat;
+        v_sort    := v_sort + 1;
+
+        insert into owner_statement_lines (
+          statement_id, unit_id, unit_label, entry_date, category_code,
+          description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+        ) values (
+          v_statement_id, r.unit_id, r.property_name || ' - ' || r.unit_number,
+          p_period_end, 'EXP-MGMT-FEE',
+          case when r.commission_pct is not null
+            then 'Management fee (' || r.commission_pct || '% of AED ' || r.unit_income || ')'
+            else 'Management fee (fixed)' end,
+          'expense', line_fee, line_vat, line_fee + line_vat, v_sort
+        );
+      end;
+    end loop;
+  end if;
+
+  -- Other fees, one line each, as entered: on the statement under their own
+  -- names, with the expenses.
+  for v_item in select * from jsonb_array_elements(v_items) loop
+    v_amount := round((v_item->>'amount')::numeric, 2);
+    v_other  := v_other + v_amount;
+    v_sort   := v_sort + 1;
+    insert into owner_statement_lines (
+      statement_id, unit_label, entry_date, category_code,
+      description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+    ) values (
+      v_statement_id, 'Portfolio', p_period_end, 'EXP-OTHER-FEES',
+      trim(v_item->>'description'), 'expense', v_amount, 0, v_amount, v_sort
+    );
+  end loop;
+
+  -- Other fees: no lines - the owner's statement shows their sum as one
+  -- "Other charges" line; what each was for stays with staff (other_charges).
+  update owner_statements
+     set other_charges_aed  = v_hidden,
+         other_charges      = (select coalesce(jsonb_agg(jsonb_build_object(
+                                 'description', trim(x->>'description'),
+                                 'amount', round((x->>'amount')::numeric, 2))), '[]'::jsonb)
+                                 from jsonb_array_elements(v_charges) x),
+         gross_income_aed   = v_income,
+         total_expenses_aed = v_expense,
+         management_fee_aed = v_fee,
+         vat_total_aed      = v_fee_vat,
+         other_fees_aed     = v_other,
+         net_payout_aed     = v_income - v_expense - v_fee - v_fee_vat - v_other - v_hidden,
+         closing_balance_aed = v_income - v_expense - v_fee - v_fee_vat - v_other - v_hidden
+   where id = v_statement_id;
+
+  return v_statement_id;
+end;
+$$;
+
+revoke all on function generate_owner_statement(uuid, date, date, numeric, boolean, jsonb, jsonb) from public, anon;
+grant execute on function generate_owner_statement(uuid, date, date, numeric, boolean, jsonb, jsonb) to authenticated;
+
+-- ####################################################################
+-- ## 0057_statement_bookings.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0057 Owner statement: summary page and booking breakdown
+--
+-- The statement as finance asked for it:
+--
+--   Page 1 - summary: number of bookings, nights rented, occupancy, gross
+--            booking income, less expenses (utilities, maintenance), less
+--            the management fee, net income payable to the owner.
+--   Page 2 - every booking: guest, check-in, check-out, nights, rent, the
+--            management fee on it and what the owner nets from it.
+--
+--   * The management fee is worked out booking by booking: each income line
+--     carries its own fee (and the VAT on it), and the statement's fee is the
+--     sum of those, so the booking pages add up to the summary to the fils.
+--       fee on a line = round(rent x percentage / 100, 2)
+--       VAT on it     = round(fee x VAT rate, 2), when applied
+--     The percentage is the one finance set, else the unit's agreement; a
+--     fixed-fee agreement stays one fee line for the unit, as before.
+--   * Each income line from a stay keeps its booking: guest, dates, nights.
+--   * owner_statements.bookings_count, rented_nights: the stays on this
+--     statement. occupancy_pct: nights booked in the period on the owner's
+--     holiday-home units over the nights those units had in it.
+--   * Other fees (0056) are for our own figures only: kept on the statement
+--     for staff, never shown to the owner, and no longer taken off the
+--     owner's payout.
+--
+--   net payout = income - expenses - utility fees - fee - VAT on the fee
+-- ============================================================================
+
+alter table owner_statement_lines
+  add column if not exists booking_id       uuid references bookings(id) on delete set null,
+  add column if not exists guest_name       text,
+  add column if not exists check_in         date,
+  add column if not exists check_out        date,
+  add column if not exists nights           integer,
+  add column if not exists mgmt_fee_aed     numeric(14,2),
+  add column if not exists mgmt_fee_vat_aed numeric(14,2);
+
+comment on column owner_statement_lines.mgmt_fee_aed is
+  'Management fee on this income line (before VAT); the statement''s fee is the sum of these plus any fixed-fee lines.';
+
+alter table owner_statements
+  add column if not exists bookings_count integer not null default 0,
+  add column if not exists rented_nights  integer not null default 0,
+  add column if not exists occupancy_pct  numeric(5,1);
+
+comment on column owner_statements.occupancy_pct is
+  'Nights booked in the period on the owner''s holiday-home units, as % of the nights those units had in it; null without such units.';
+comment on column owner_statements.other_charges_aed is
+  'Other fees entered for our own figures: never on the owner''s statement and not taken off the payout.';
+comment on column owner_statements.other_charges is
+  'What each other fee was for, with its amount: for staff only, never on the owner''s statement.';
+
+create or replace function generate_owner_statement(
+  p_owner_id        uuid,
+  p_period_start    date,
+  p_period_end      date,
+  p_fee_pct         numeric default null,
+  p_fee_vat         boolean default true,
+  p_other_items     jsonb default '[]'::jsonb,
+  p_other_charges   jsonb default '[]'::jsonb
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_statement_id uuid;
+  v_income   numeric(14,2) := 0;
+  v_expense  numeric(14,2) := 0;
+  v_fee      numeric(14,2) := 0;
+  v_fee_vat  numeric(14,2) := 0;
+  v_other    numeric(14,2) := 0;
+  v_items    jsonb := coalesce(p_other_items, '[]'::jsonb);
+  v_item     jsonb;
+  v_amount   numeric(14,2);
+  v_charges  jsonb := coalesce(p_other_charges, '[]'::jsonb);
+  v_hidden   numeric(14,2) := 0;
+  v_vat_rate numeric(5,4);
+  v_sort     integer := 0;
+  v_pct      numeric;
+  v_with_vat boolean;
+  v_line_fee numeric(14,2);
+  v_line_vat numeric(14,2);
+  v_units    integer;
+  v_booked   integer;
+  r          record;
+begin
+  if not pms.is_staff() and auth.uid() is not null then
+    raise exception 'Only staff can generate statements' using errcode = 'insufficient_privilege';
+  end if;
+  if p_fee_pct is not null and (p_fee_pct < 0 or p_fee_pct > 100) then
+    raise exception 'The management fee must be between 0%% and 100%%' using errcode = 'check_violation';
+  end if;
+  if jsonb_typeof(v_charges) <> 'array' then
+    raise exception 'Other fees must be a list' using errcode = 'invalid_parameter_value';
+  end if;
+  for v_item in select * from jsonb_array_elements(v_charges) loop
+    if length(trim(coalesce(v_item->>'description', ''))) not between 1 and 200
+       or (v_item->>'amount') is null or (v_item->>'amount')::numeric <= 0 then
+      raise exception 'Each other fee needs what it is for and an amount above 0'
+        using errcode = 'check_violation';
+    end if;
+    v_hidden := v_hidden + round((v_item->>'amount')::numeric, 2);
+  end loop;
+
+  if jsonb_typeof(v_items) <> 'array' then
+    raise exception 'Utility fees must be a list' using errcode = 'invalid_parameter_value';
+  end if;
+  for v_item in select * from jsonb_array_elements(v_items) loop
+    if length(trim(coalesce(v_item->>'description', ''))) not between 1 and 200
+       or (v_item->>'amount') is null or (v_item->>'amount')::numeric <= 0 then
+      raise exception 'Each utility fee needs what it is for and an amount above 0'
+        using errcode = 'check_violation';
+    end if;
+  end loop;
+
+  select coalesce(vat_rate, 0) into v_vat_rate from company_settings where id;
+  v_vat_rate := coalesce(v_vat_rate, 0);
+
+  if exists (
+    select 1 from owner_statements
+    where owner_id = p_owner_id
+      and period_start = p_period_start
+      and period_end = p_period_end
+      and status <> 'void'
+  ) then
+    raise exception 'A statement already exists for this owner and period';
+  end if;
+
+  insert into owner_statements (owner_id, period_start, period_end, status, created_by,
+                                management_fee_pct, fee_vat_applied, other_fees_aed, other_fees_note)
+  values (p_owner_id, p_period_start, p_period_end, 'draft', auth.uid(),
+          p_fee_pct, case when p_fee_pct is not null then p_fee_vat end, 0, null)
+  returning id into v_statement_id;
+
+  -- Snapshot every ledger entry on this owner's units for the period that has
+  -- not already been carried on another statement. Income lines carry their
+  -- stay and the management fee on them.
+  for r in
+    select le.*, gc.code as category_code, gc.affects_owner_statement,
+           u.unit_number, p.name as property_name,
+           b.check_in as b_check_in, b.check_out as b_check_out, b.nights as b_nights,
+           coalesce(g.full_name,
+                    (select bg.full_name from booking_guests bg
+                      where bg.booking_id = b.id
+                      order by bg.is_lead_guest desc, bg.created_at limit 1)) as b_guest,
+           ma.commission_pct as ma_pct, ma.fee_vat_applicable as ma_vat
+    from ledger_entries le
+    join gl_categories gc on gc.id = le.category_id
+    left join units u on u.id = le.unit_id
+    left join properties p on p.id = u.property_id
+    left join bookings b on b.id = le.booking_id
+    left join guests g on g.id = b.guest_id
+    left join lateral (
+      select m.commission_pct, m.fee_vat_applicable
+        from management_agreements m
+       where m.unit_id = le.unit_id
+         and m.owner_id = p_owner_id
+         and m.is_active
+         and m.start_date <= p_period_end
+         and m.end_date >= p_period_start
+       order by m.start_date desc
+       limit 1
+    ) ma on true
+    where le.owner_id = p_owner_id
+      and le.entry_date between p_period_start and p_period_end
+      and le.statement_id is null
+      and le.is_owner_visible
+      and gc.affects_owner_statement
+      and gc.code <> 'EXP-MGMT-FEE'      -- the fee is computed here, not copied
+    order by le.entry_date, le.created_at
+  loop
+    v_sort := v_sort + 1;
+    v_line_fee := null;
+    v_line_vat := null;
+
+    if r.direction = 'income' then
+      v_income := v_income + r.amount_aed;
+      v_pct      := coalesce(p_fee_pct, r.ma_pct);
+      v_with_vat := case when p_fee_pct is not null then p_fee_vat else coalesce(r.ma_vat, false) end;
+      if v_pct is not null then
+        v_line_fee := round(r.amount_aed * v_pct / 100.0, 2);
+        v_line_vat := case when v_with_vat then round(v_line_fee * v_vat_rate, 2) else 0 end;
+        v_fee      := v_fee + v_line_fee;
+        v_fee_vat  := v_fee_vat + v_line_vat;
+      end if;
+    else
+      v_expense := v_expense + r.total_aed;
+    end if;
+
+    insert into owner_statement_lines (
+      statement_id, ledger_entry_id, unit_id, unit_label, entry_date,
+      category_code, description, direction, amount_aed, vat_amount_aed,
+      total_aed, sort_order,
+      booking_id, guest_name, check_in, check_out, nights, mgmt_fee_aed, mgmt_fee_vat_aed
+    ) values (
+      v_statement_id, r.id, r.unit_id,
+      coalesce(r.property_name || ' - ' || r.unit_number, 'Portfolio'),
+      r.entry_date, r.category_code, r.description, r.direction,
+      r.amount_aed, r.vat_amount_aed, r.total_aed, v_sort,
+      r.booking_id, r.b_guest, r.b_check_in, r.b_check_out, r.b_nights, v_line_fee, v_line_vat
+    );
+
+    update ledger_entries set statement_id = v_statement_id where id = r.id;
+  end loop;
+
+  -- Fixed-fee agreements (no percentage, none set by finance): one line per unit.
+  if p_fee_pct is null then
+    for r in
+      select ma.unit_id, ma.fixed_fee_aed, ma.fee_vat_applicable,
+             u.unit_number, p.name as property_name
+      from management_agreements ma
+      join units u on u.id = ma.unit_id
+      join properties p on p.id = u.property_id
+      where ma.owner_id = p_owner_id
+        and ma.is_active
+        and ma.start_date <= p_period_end
+        and ma.end_date >= p_period_start
+        and ma.commission_pct is null
+        and coalesce(ma.fixed_fee_aed, 0) > 0
+    loop
+      -- Management fee is a taxable supply of services: VAT normally applies.
+      v_line_fee := r.fixed_fee_aed;
+      v_line_vat := case when r.fee_vat_applicable then round(v_line_fee * v_vat_rate, 2) else 0 end;
+      v_fee      := v_fee + v_line_fee;
+      v_fee_vat  := v_fee_vat + v_line_vat;
+      v_sort     := v_sort + 1;
+
+      insert into owner_statement_lines (
+        statement_id, unit_id, unit_label, entry_date, category_code,
+        description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+      ) values (
+        v_statement_id, r.unit_id, r.property_name || ' - ' || r.unit_number,
+        p_period_end, 'EXP-MGMT-FEE', 'Management fee (fixed)',
+        'expense', v_line_fee, v_line_vat, v_line_fee + v_line_vat, v_sort
+      );
+    end loop;
+  end if;
+
+  -- Utility fees, one line each, as entered, with the expenses.
+  for v_item in select * from jsonb_array_elements(v_items) loop
+    v_amount := round((v_item->>'amount')::numeric, 2);
+    v_other  := v_other + v_amount;
+    v_sort   := v_sort + 1;
+    insert into owner_statement_lines (
+      statement_id, unit_label, entry_date, category_code,
+      description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+    ) values (
+      v_statement_id, 'Portfolio', p_period_end, 'EXP-OTHER-FEES',
+      trim(v_item->>'description'), 'expense', v_amount, 0, v_amount, v_sort
+    );
+  end loop;
+
+  -- Occupancy: nights booked inside the period on the owner's holiday-home
+  -- units, over the nights those units had in it.
+  select count(*) into v_units
+    from units u
+   where u.operating_mode in ('short_term', 'both')
+     and exists (select 1 from unit_ownerships uo
+                  where uo.unit_id = u.id and uo.owner_id = p_owner_id
+                    and uo.start_date <= p_period_end
+                    and (uo.end_date is null or uo.end_date >= p_period_start));
+  select coalesce(sum(greatest(0, least(b.check_out, p_period_end + 1)
+                                  - greatest(b.check_in, p_period_start))), 0)
+    into v_booked
+    from bookings b
+    join units u on u.id = b.unit_id
+   where u.operating_mode in ('short_term', 'both')
+     and b.status in ('confirmed', 'checked_in', 'checked_out')
+     and b.check_in <= p_period_end
+     and b.check_out > p_period_start
+     and exists (select 1 from unit_ownerships uo
+                  where uo.unit_id = u.id and uo.owner_id = p_owner_id
+                    and uo.start_date <= p_period_end
+                    and (uo.end_date is null or uo.end_date >= p_period_start));
+
+  -- Other fees: kept for staff (other_charges), never on the owner's
+  -- statement and not taken off the payout.
+  update owner_statements
+     set other_charges_aed  = v_hidden,
+         other_charges      = (select coalesce(jsonb_agg(jsonb_build_object(
+                                 'description', trim(x->>'description'),
+                                 'amount', round((x->>'amount')::numeric, 2))), '[]'::jsonb)
+                                 from jsonb_array_elements(v_charges) x),
+         gross_income_aed   = v_income,
+         total_expenses_aed = v_expense,
+         management_fee_aed = v_fee,
+         vat_total_aed      = v_fee_vat,
+         other_fees_aed     = v_other,
+         bookings_count     = (select count(distinct booking_id) from owner_statement_lines
+                                where statement_id = v_statement_id and direction = 'income'
+                                  and booking_id is not null),
+         rented_nights      = (select coalesce(sum(nights), 0) from (
+                                 select distinct on (booking_id) nights from owner_statement_lines
+                                  where statement_id = v_statement_id and direction = 'income'
+                                    and booking_id is not null) s),
+         occupancy_pct      = case when v_units > 0 then
+                                least(100, round(v_booked * 100.0 / (v_units * (p_period_end - p_period_start + 1)), 1))
+                              end,
+         net_payout_aed     = v_income - v_expense - v_other - v_fee - v_fee_vat,
+         closing_balance_aed = v_income - v_expense - v_other - v_fee - v_fee_vat
+   where id = v_statement_id;
+
+  return v_statement_id;
+end;
+$$;
+
+revoke all on function generate_owner_statement(uuid, date, date, numeric, boolean, jsonb, jsonb) from public, anon;
+grant execute on function generate_owner_statement(uuid, date, date, numeric, boolean, jsonb, jsonb) to authenticated;
+
+-- ####################################################################
+-- ## 0058_statement_occupancy.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0058 Occupancy: count the owner's units whenever they were linked
+--
+-- 0057 counted a unit towards occupancy only if its ownership started before
+-- the period ended. unit_ownerships.start_date defaults to the day the owner
+-- was linked in the portal, not the day they bought the unit, so a unit
+-- linked after the period showed no occupancy ("-") although its calendar
+-- was booked. generate_owner_statement() is as 0057 otherwise.
+-- ============================================================================
+
+create or replace function generate_owner_statement(
+  p_owner_id        uuid,
+  p_period_start    date,
+  p_period_end      date,
+  p_fee_pct         numeric default null,
+  p_fee_vat         boolean default true,
+  p_other_items     jsonb default '[]'::jsonb,
+  p_other_charges   jsonb default '[]'::jsonb
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_statement_id uuid;
+  v_income   numeric(14,2) := 0;
+  v_expense  numeric(14,2) := 0;
+  v_fee      numeric(14,2) := 0;
+  v_fee_vat  numeric(14,2) := 0;
+  v_other    numeric(14,2) := 0;
+  v_items    jsonb := coalesce(p_other_items, '[]'::jsonb);
+  v_item     jsonb;
+  v_amount   numeric(14,2);
+  v_charges  jsonb := coalesce(p_other_charges, '[]'::jsonb);
+  v_hidden   numeric(14,2) := 0;
+  v_vat_rate numeric(5,4);
+  v_sort     integer := 0;
+  v_pct      numeric;
+  v_with_vat boolean;
+  v_line_fee numeric(14,2);
+  v_line_vat numeric(14,2);
+  v_units    integer;
+  v_booked   integer;
+  r          record;
+begin
+  if not pms.is_staff() and auth.uid() is not null then
+    raise exception 'Only staff can generate statements' using errcode = 'insufficient_privilege';
+  end if;
+  if p_fee_pct is not null and (p_fee_pct < 0 or p_fee_pct > 100) then
+    raise exception 'The management fee must be between 0%% and 100%%' using errcode = 'check_violation';
+  end if;
+  if jsonb_typeof(v_charges) <> 'array' then
+    raise exception 'Other fees must be a list' using errcode = 'invalid_parameter_value';
+  end if;
+  for v_item in select * from jsonb_array_elements(v_charges) loop
+    if length(trim(coalesce(v_item->>'description', ''))) not between 1 and 200
+       or (v_item->>'amount') is null or (v_item->>'amount')::numeric <= 0 then
+      raise exception 'Each other fee needs what it is for and an amount above 0'
+        using errcode = 'check_violation';
+    end if;
+    v_hidden := v_hidden + round((v_item->>'amount')::numeric, 2);
+  end loop;
+
+  if jsonb_typeof(v_items) <> 'array' then
+    raise exception 'Utility fees must be a list' using errcode = 'invalid_parameter_value';
+  end if;
+  for v_item in select * from jsonb_array_elements(v_items) loop
+    if length(trim(coalesce(v_item->>'description', ''))) not between 1 and 200
+       or (v_item->>'amount') is null or (v_item->>'amount')::numeric <= 0 then
+      raise exception 'Each utility fee needs what it is for and an amount above 0'
+        using errcode = 'check_violation';
+    end if;
+  end loop;
+
+  select coalesce(vat_rate, 0) into v_vat_rate from company_settings where id;
+  v_vat_rate := coalesce(v_vat_rate, 0);
+
+  if exists (
+    select 1 from owner_statements
+    where owner_id = p_owner_id
+      and period_start = p_period_start
+      and period_end = p_period_end
+      and status <> 'void'
+  ) then
+    raise exception 'A statement already exists for this owner and period';
+  end if;
+
+  insert into owner_statements (owner_id, period_start, period_end, status, created_by,
+                                management_fee_pct, fee_vat_applied, other_fees_aed, other_fees_note)
+  values (p_owner_id, p_period_start, p_period_end, 'draft', auth.uid(),
+          p_fee_pct, case when p_fee_pct is not null then p_fee_vat end, 0, null)
+  returning id into v_statement_id;
+
+  -- Snapshot every ledger entry on this owner's units for the period that has
+  -- not already been carried on another statement. Income lines carry their
+  -- stay and the management fee on them.
+  for r in
+    select le.*, gc.code as category_code, gc.affects_owner_statement,
+           u.unit_number, p.name as property_name,
+           b.check_in as b_check_in, b.check_out as b_check_out, b.nights as b_nights,
+           coalesce(g.full_name,
+                    (select bg.full_name from booking_guests bg
+                      where bg.booking_id = b.id
+                      order by bg.is_lead_guest desc, bg.created_at limit 1)) as b_guest,
+           ma.commission_pct as ma_pct, ma.fee_vat_applicable as ma_vat
+    from ledger_entries le
+    join gl_categories gc on gc.id = le.category_id
+    left join units u on u.id = le.unit_id
+    left join properties p on p.id = u.property_id
+    left join bookings b on b.id = le.booking_id
+    left join guests g on g.id = b.guest_id
+    left join lateral (
+      select m.commission_pct, m.fee_vat_applicable
+        from management_agreements m
+       where m.unit_id = le.unit_id
+         and m.owner_id = p_owner_id
+         and m.is_active
+         and m.start_date <= p_period_end
+         and m.end_date >= p_period_start
+       order by m.start_date desc
+       limit 1
+    ) ma on true
+    where le.owner_id = p_owner_id
+      and le.entry_date between p_period_start and p_period_end
+      and le.statement_id is null
+      and le.is_owner_visible
+      and gc.affects_owner_statement
+      and gc.code <> 'EXP-MGMT-FEE'      -- the fee is computed here, not copied
+    order by le.entry_date, le.created_at
+  loop
+    v_sort := v_sort + 1;
+    v_line_fee := null;
+    v_line_vat := null;
+
+    if r.direction = 'income' then
+      v_income := v_income + r.amount_aed;
+      v_pct      := coalesce(p_fee_pct, r.ma_pct);
+      v_with_vat := case when p_fee_pct is not null then p_fee_vat else coalesce(r.ma_vat, false) end;
+      if v_pct is not null then
+        v_line_fee := round(r.amount_aed * v_pct / 100.0, 2);
+        v_line_vat := case when v_with_vat then round(v_line_fee * v_vat_rate, 2) else 0 end;
+        v_fee      := v_fee + v_line_fee;
+        v_fee_vat  := v_fee_vat + v_line_vat;
+      end if;
+    else
+      v_expense := v_expense + r.total_aed;
+    end if;
+
+    insert into owner_statement_lines (
+      statement_id, ledger_entry_id, unit_id, unit_label, entry_date,
+      category_code, description, direction, amount_aed, vat_amount_aed,
+      total_aed, sort_order,
+      booking_id, guest_name, check_in, check_out, nights, mgmt_fee_aed, mgmt_fee_vat_aed
+    ) values (
+      v_statement_id, r.id, r.unit_id,
+      coalesce(r.property_name || ' - ' || r.unit_number, 'Portfolio'),
+      r.entry_date, r.category_code, r.description, r.direction,
+      r.amount_aed, r.vat_amount_aed, r.total_aed, v_sort,
+      r.booking_id, r.b_guest, r.b_check_in, r.b_check_out, r.b_nights, v_line_fee, v_line_vat
+    );
+
+    update ledger_entries set statement_id = v_statement_id where id = r.id;
+  end loop;
+
+  -- Fixed-fee agreements (no percentage, none set by finance): one line per unit.
+  if p_fee_pct is null then
+    for r in
+      select ma.unit_id, ma.fixed_fee_aed, ma.fee_vat_applicable,
+             u.unit_number, p.name as property_name
+      from management_agreements ma
+      join units u on u.id = ma.unit_id
+      join properties p on p.id = u.property_id
+      where ma.owner_id = p_owner_id
+        and ma.is_active
+        and ma.start_date <= p_period_end
+        and ma.end_date >= p_period_start
+        and ma.commission_pct is null
+        and coalesce(ma.fixed_fee_aed, 0) > 0
+    loop
+      -- Management fee is a taxable supply of services: VAT normally applies.
+      v_line_fee := r.fixed_fee_aed;
+      v_line_vat := case when r.fee_vat_applicable then round(v_line_fee * v_vat_rate, 2) else 0 end;
+      v_fee      := v_fee + v_line_fee;
+      v_fee_vat  := v_fee_vat + v_line_vat;
+      v_sort     := v_sort + 1;
+
+      insert into owner_statement_lines (
+        statement_id, unit_id, unit_label, entry_date, category_code,
+        description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+      ) values (
+        v_statement_id, r.unit_id, r.property_name || ' - ' || r.unit_number,
+        p_period_end, 'EXP-MGMT-FEE', 'Management fee (fixed)',
+        'expense', v_line_fee, v_line_vat, v_line_fee + v_line_vat, v_sort
+      );
+    end loop;
+  end if;
+
+  -- Utility fees, one line each, as entered, with the expenses.
+  for v_item in select * from jsonb_array_elements(v_items) loop
+    v_amount := round((v_item->>'amount')::numeric, 2);
+    v_other  := v_other + v_amount;
+    v_sort   := v_sort + 1;
+    insert into owner_statement_lines (
+      statement_id, unit_label, entry_date, category_code,
+      description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+    ) values (
+      v_statement_id, 'Portfolio', p_period_end, 'EXP-OTHER-FEES',
+      trim(v_item->>'description'), 'expense', v_amount, 0, v_amount, v_sort
+    );
+  end loop;
+
+  -- Occupancy: nights booked inside the period on the owner's holiday-home
+  -- units, over the nights those units had in it. The ownership's start date
+  -- is not checked: it defaults to the day the owner was linked (0003).
+  select count(*) into v_units
+    from units u
+   where u.operating_mode in ('short_term', 'both')
+     and exists (select 1 from unit_ownerships uo
+                  where uo.unit_id = u.id and uo.owner_id = p_owner_id
+                    and (uo.end_date is null or uo.end_date >= p_period_start));
+  select coalesce(sum(greatest(0, least(b.check_out, p_period_end + 1)
+                                  - greatest(b.check_in, p_period_start))), 0)
+    into v_booked
+    from bookings b
+    join units u on u.id = b.unit_id
+   where u.operating_mode in ('short_term', 'both')
+     and b.status in ('confirmed', 'checked_in', 'checked_out')
+     and b.check_in <= p_period_end
+     and b.check_out > p_period_start
+     and exists (select 1 from unit_ownerships uo
+                  where uo.unit_id = u.id and uo.owner_id = p_owner_id
+                    and (uo.end_date is null or uo.end_date >= p_period_start));
+
+  -- Other fees: kept for staff (other_charges), never on the owner's
+  -- statement and not taken off the payout.
+  update owner_statements
+     set other_charges_aed  = v_hidden,
+         other_charges      = (select coalesce(jsonb_agg(jsonb_build_object(
+                                 'description', trim(x->>'description'),
+                                 'amount', round((x->>'amount')::numeric, 2))), '[]'::jsonb)
+                                 from jsonb_array_elements(v_charges) x),
+         gross_income_aed   = v_income,
+         total_expenses_aed = v_expense,
+         management_fee_aed = v_fee,
+         vat_total_aed      = v_fee_vat,
+         other_fees_aed     = v_other,
+         bookings_count     = (select count(distinct booking_id) from owner_statement_lines
+                                where statement_id = v_statement_id and direction = 'income'
+                                  and booking_id is not null),
+         rented_nights      = (select coalesce(sum(nights), 0) from (
+                                 select distinct on (booking_id) nights from owner_statement_lines
+                                  where statement_id = v_statement_id and direction = 'income'
+                                    and booking_id is not null) s),
+         occupancy_pct      = case when v_units > 0 then
+                                least(100, round(v_booked * 100.0 / (v_units * (p_period_end - p_period_start + 1)), 1))
+                              end,
+         net_payout_aed     = v_income - v_expense - v_other - v_fee - v_fee_vat,
+         closing_balance_aed = v_income - v_expense - v_other - v_fee - v_fee_vat
+   where id = v_statement_id;
+
+  return v_statement_id;
+end;
+$$;
+
+revoke all on function generate_owner_statement(uuid, date, date, numeric, boolean, jsonb, jsonb) from public, anon;
+grant execute on function generate_owner_statement(uuid, date, date, numeric, boolean, jsonb, jsonb) to authenticated;
+
+-- ####################################################################
+-- ## 0059_stay_income_by_period.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0059 Long stays: income by the nights in each statement period
+--
+-- Owner statements are generated on the 15th of each month, for the 16th of
+-- the month before to the 15th. A stay's payout used to post in one line on
+-- its check-out day, so a stay from 28 Sep to 1 Dec showed on no statement
+-- until December. Now a stay is cut at every 16th it spans, and each part
+-- posts as its own income line once its period has come:
+--
+--   28 Sep - 1 Dec (64 nights, AED 6,400)
+--     28 Sep - 15 Oct  18 nights  dated 15 Oct  AED 1,800.00
+--     16 Oct - 15 Nov  31 nights  dated 15 Nov  AED 3,100.00
+--     16 Nov - 30 Nov  15 nights  dated  1 Dec  AED 1,500.00 (the rest)
+--
+--   * each part = round(payout x its nights / the stay's nights, 2); the last
+--     part takes what is left, so the parts always add up to the payout.
+--   * a part in an owner statement is frozen; a later change of payout
+--     lands on the parts not yet in one.
+--   * a stay that ends on the 16th is dated the 15th: its last night is in
+--     the period that closes then.
+--   * ledger_entries.stay_nights: the nights a line covers (0 for a cancelled
+--     stay whose payout is kept, which posts whole on its check-out day).
+--   * stays with a one-line posting already in a statement are left as they
+--     are; one-line postings not in a statement are redone in parts.
+--   * statements count the nights of each line, not the whole stay's.
+-- ============================================================================
+
+alter table ledger_entries add column if not exists stay_nights integer;
+
+comment on column ledger_entries.stay_nights is
+  'For a stay''s income line: the nights it covers (a stay is posted in parts, one per statement period; 0059).';
+
+drop index if exists ledger_entries_booking_source_idx;
+create unique index if not exists ledger_entries_booking_part_idx
+  on ledger_entries (source_id, entry_date)
+  where source_table = 'bookings';
+
+
+-- ---------------------------------------------------------------------------
+-- pms.stay_parts: a stay cut at every 16th it spans.
+-- ---------------------------------------------------------------------------
+create or replace function pms.stay_parts(p_check_in date, p_check_out date)
+returns table (entry_date date, nights integer, is_last boolean)
+language sql
+immutable
+as $$
+  with cuts as (
+    select d::date as d
+      from generate_series(date_trunc('month', p_check_in)::date + 15, p_check_out - 1, interval '1 month') d
+     where d::date > p_check_in
+  ), parts as (
+    select a, lead(a, 1, p_check_out) over (order by a) as b
+      from (select p_check_in as a union all select d from cuts) x
+  )
+  select case when extract(day from b) = 16 then b - 1 else b end,
+         b - a,
+         b = p_check_out
+    from parts
+   order by a;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- post_completed_bookings: as 0047, with stays posted in parts.
+-- ---------------------------------------------------------------------------
+create or replace function post_completed_bookings()
+returns integer
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_today  date := (now() at time zone 'Asia/Dubai')::date;
+  v_cat    uuid := (select id from gl_categories where code = 'INC-BOOKING');
+  v_posted integer;
+begin
+  -- Staff, or the service role (cron). Owners and tenants never post.
+  if auth.uid() is not null and not pms.is_staff() then
+    return 0;
+  end if;
+
+  create temp table if not exists pms_stay_income (
+    booking_id  uuid,
+    entry_date  date,
+    nights      integer,
+    amount_aed  numeric(14,2),
+    unit_id     uuid,
+    description text
+  ) on commit drop;
+  truncate pms_stay_income;
+
+  -- Every part that is due, with its amount.
+  insert into pms_stay_income
+  with q as (
+    select b.*
+      from bookings b
+     where (b.status in ('confirmed','checked_in','checked_out')
+            or (b.status = 'cancelled' and b.payout_kept))
+       and coalesce(b.payout_expected_aed, 0) > 0
+       and b.check_in <= v_today
+       -- A one-line posting (before 0059), or a part whose dates no longer
+       -- fit the stay, already in a statement: leave the stay as it is.
+       and not exists (
+         select 1 from ledger_entries le
+          where le.source_table = 'bookings' and le.source_id = b.id
+            and le.statement_id is not null
+            and (le.stay_nights is null
+                 or (b.status <> 'cancelled'
+                     and le.entry_date not in (select s.entry_date from pms.stay_parts(b.check_in, b.check_out) s))))
+  ), p as (
+    select q.id, q.unit_id, q.payout_expected_aed as payout, q.nights as total,
+           s.entry_date, s.nights, s.is_last,
+           count(*) over (partition by q.id) as parts,
+           case when q.status = 'cancelled' then 'Cancelled stay, payout kept ' else 'Stay ' end
+             || q.booking_number
+             || coalesce(' (' || case q.channel when 'airbnb' then 'Airbnb' when 'booking_com' then 'Booking.com' else initcap(replace(q.channel::text, '_', ' ')) end || ' ' || q.external_booking_id || ')', '')
+             || ', ' || to_char(q.check_in, 'DD Mon') || ' - ' || to_char(q.check_out, 'DD Mon YYYY') as label
+      from q
+      cross join lateral (
+        select x.entry_date, x.nights, x.is_last
+          from pms.stay_parts(q.check_in, q.check_out) x
+         where q.status <> 'cancelled'
+        union all
+        select case when extract(day from q.check_out) = 16 then q.check_out - 1 else q.check_out end, q.nights, true
+         where q.status = 'cancelled'
+      ) s
+  ), d as (
+    select p.*, f.amount_aed as frozen,
+           case when not p.is_last
+                then coalesce(f.amount_aed, round(p.payout * p.nights / p.total, 2)) end as share
+      from p
+      left join ledger_entries f
+        on f.source_table = 'bookings' and f.source_id = p.id
+       and f.entry_date = p.entry_date and f.statement_id is not null
+  ), e as (
+    select d.*,
+           case when d.is_last
+                then coalesce(d.frozen, d.payout - coalesce(sum(d.share) over (partition by d.id), 0))
+                else d.share end as amount
+      from d
+  )
+  select e.id, e.entry_date,
+         case when e.label like 'Cancelled%' then 0 else e.nights end,
+         e.amount, e.unit_id,
+         e.label || case when e.parts > 1 then ' (' || e.nights || ' of ' || e.total || ' nights)' else '' end
+    from e
+   where e.entry_date <= v_today;
+
+  -- Lines whose stay was deleted, not yet in a statement.
+  delete from ledger_entries le
+   where le.source_table = 'bookings'
+     and le.statement_id is null
+     and not exists (select 1 from bookings b where b.id = le.source_id);
+
+  -- Lines no longer due (cancelled, unpriced, dates moved, one-line
+  -- postings now in parts), not yet in a statement.
+  delete from ledger_entries le
+   where le.source_table = 'bookings'
+     and le.statement_id is null
+     and (le.stay_nights is null
+          or not exists (select 1 from pms_stay_income w
+                          where w.booking_id = le.source_id and w.entry_date = le.entry_date));
+
+  -- Lines whose amount, nights or unit moved, not yet in a statement.
+  update ledger_entries le
+     set amount_aed  = w.amount_aed,
+         stay_nights = w.nights,
+         description = w.description,
+         unit_id     = w.unit_id,
+         owner_id    = case when le.unit_id is distinct from w.unit_id then
+                         (select uo.owner_id from unit_ownerships uo
+                           where uo.unit_id = w.unit_id and uo.end_date is null
+                           order by uo.is_primary_contact desc, uo.ownership_pct desc
+                           limit 1)
+                       else le.owner_id end
+    from pms_stay_income w
+   where le.source_table = 'bookings'
+     and le.source_id = w.booking_id
+     and le.entry_date = w.entry_date
+     and le.statement_id is null
+     and (le.amount_aed <> w.amount_aed
+          or le.stay_nights is distinct from w.nights
+          or le.description is distinct from w.description
+          or le.unit_id is distinct from w.unit_id);
+
+  -- New lines for the parts that are due.
+  insert into ledger_entries (
+    entry_date, unit_id, owner_id, category_id, direction, description,
+    amount_aed, vat_applicable, source_table, source_id, booking_id, stay_nights
+  )
+  select w.entry_date,
+         w.unit_id,
+         (select uo.owner_id from unit_ownerships uo
+           where uo.unit_id = w.unit_id and uo.end_date is null
+           order by uo.is_primary_contact desc, uo.ownership_pct desc
+           limit 1),
+         v_cat,
+         'income',
+         w.description,
+         w.amount_aed,
+         false,
+         'bookings',
+         w.booking_id,
+         w.booking_id,
+         w.nights
+    from pms_stay_income w
+   where not exists (select 1 from ledger_entries le
+                      where le.source_table = 'bookings'
+                        and le.source_id = w.booking_id
+                        and le.entry_date = w.entry_date);
+  get diagnostics v_posted = row_count;
+
+  return v_posted;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- generate_owner_statement: as 0058, counting each line's nights.
+-- ---------------------------------------------------------------------------
+create or replace function generate_owner_statement(
+  p_owner_id        uuid,
+  p_period_start    date,
+  p_period_end      date,
+  p_fee_pct         numeric default null,
+  p_fee_vat         boolean default true,
+  p_other_items     jsonb default '[]'::jsonb,
+  p_other_charges   jsonb default '[]'::jsonb
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_statement_id uuid;
+  v_income   numeric(14,2) := 0;
+  v_expense  numeric(14,2) := 0;
+  v_fee      numeric(14,2) := 0;
+  v_fee_vat  numeric(14,2) := 0;
+  v_other    numeric(14,2) := 0;
+  v_items    jsonb := coalesce(p_other_items, '[]'::jsonb);
+  v_item     jsonb;
+  v_amount   numeric(14,2);
+  v_charges  jsonb := coalesce(p_other_charges, '[]'::jsonb);
+  v_hidden   numeric(14,2) := 0;
+  v_vat_rate numeric(5,4);
+  v_sort     integer := 0;
+  v_pct      numeric;
+  v_with_vat boolean;
+  v_line_fee numeric(14,2);
+  v_line_vat numeric(14,2);
+  v_units    integer;
+  v_booked   integer;
+  r          record;
+begin
+  if not pms.is_staff() and auth.uid() is not null then
+    raise exception 'Only staff can generate statements' using errcode = 'insufficient_privilege';
+  end if;
+  if p_fee_pct is not null and (p_fee_pct < 0 or p_fee_pct > 100) then
+    raise exception 'The management fee must be between 0%% and 100%%' using errcode = 'check_violation';
+  end if;
+  if jsonb_typeof(v_charges) <> 'array' then
+    raise exception 'Other fees must be a list' using errcode = 'invalid_parameter_value';
+  end if;
+  for v_item in select * from jsonb_array_elements(v_charges) loop
+    if length(trim(coalesce(v_item->>'description', ''))) not between 1 and 200
+       or (v_item->>'amount') is null or (v_item->>'amount')::numeric <= 0 then
+      raise exception 'Each other fee needs what it is for and an amount above 0'
+        using errcode = 'check_violation';
+    end if;
+    v_hidden := v_hidden + round((v_item->>'amount')::numeric, 2);
+  end loop;
+
+  if jsonb_typeof(v_items) <> 'array' then
+    raise exception 'Utility fees must be a list' using errcode = 'invalid_parameter_value';
+  end if;
+  for v_item in select * from jsonb_array_elements(v_items) loop
+    if length(trim(coalesce(v_item->>'description', ''))) not between 1 and 200
+       or (v_item->>'amount') is null or (v_item->>'amount')::numeric <= 0 then
+      raise exception 'Each utility fee needs what it is for and an amount above 0'
+        using errcode = 'check_violation';
+    end if;
+  end loop;
+
+  select coalesce(vat_rate, 0) into v_vat_rate from company_settings where id;
+  v_vat_rate := coalesce(v_vat_rate, 0);
+
+  if exists (
+    select 1 from owner_statements
+    where owner_id = p_owner_id
+      and period_start = p_period_start
+      and period_end = p_period_end
+      and status <> 'void'
+  ) then
+    raise exception 'A statement already exists for this owner and period';
+  end if;
+
+  insert into owner_statements (owner_id, period_start, period_end, status, created_by,
+                                management_fee_pct, fee_vat_applied, other_fees_aed, other_fees_note)
+  values (p_owner_id, p_period_start, p_period_end, 'draft', auth.uid(),
+          p_fee_pct, case when p_fee_pct is not null then p_fee_vat end, 0, null)
+  returning id into v_statement_id;
+
+  -- Snapshot every ledger entry on this owner's units for the period that has
+  -- not already been carried on another statement. Income lines carry their
+  -- stay and the management fee on them.
+  for r in
+    select le.*, gc.code as category_code, gc.affects_owner_statement,
+           u.unit_number, p.name as property_name,
+           b.check_in as b_check_in, b.check_out as b_check_out,
+           coalesce(le.stay_nights, b.nights) as b_nights,
+           coalesce(g.full_name,
+                    (select bg.full_name from booking_guests bg
+                      where bg.booking_id = b.id
+                      order by bg.is_lead_guest desc, bg.created_at limit 1)) as b_guest,
+           ma.commission_pct as ma_pct, ma.fee_vat_applicable as ma_vat
+    from ledger_entries le
+    join gl_categories gc on gc.id = le.category_id
+    left join units u on u.id = le.unit_id
+    left join properties p on p.id = u.property_id
+    left join bookings b on b.id = le.booking_id
+    left join guests g on g.id = b.guest_id
+    left join lateral (
+      select m.commission_pct, m.fee_vat_applicable
+        from management_agreements m
+       where m.unit_id = le.unit_id
+         and m.owner_id = p_owner_id
+         and m.is_active
+         and m.start_date <= p_period_end
+         and m.end_date >= p_period_start
+       order by m.start_date desc
+       limit 1
+    ) ma on true
+    where le.owner_id = p_owner_id
+      and le.entry_date between p_period_start and p_period_end
+      and le.statement_id is null
+      and le.is_owner_visible
+      and gc.affects_owner_statement
+      and gc.code <> 'EXP-MGMT-FEE'      -- the fee is computed here, not copied
+    order by le.entry_date, le.created_at
+  loop
+    v_sort := v_sort + 1;
+    v_line_fee := null;
+    v_line_vat := null;
+
+    if r.direction = 'income' then
+      v_income := v_income + r.amount_aed;
+      v_pct      := coalesce(p_fee_pct, r.ma_pct);
+      v_with_vat := case when p_fee_pct is not null then p_fee_vat else coalesce(r.ma_vat, false) end;
+      if v_pct is not null then
+        v_line_fee := round(r.amount_aed * v_pct / 100.0, 2);
+        v_line_vat := case when v_with_vat then round(v_line_fee * v_vat_rate, 2) else 0 end;
+        v_fee      := v_fee + v_line_fee;
+        v_fee_vat  := v_fee_vat + v_line_vat;
+      end if;
+    else
+      v_expense := v_expense + r.total_aed;
+    end if;
+
+    insert into owner_statement_lines (
+      statement_id, ledger_entry_id, unit_id, unit_label, entry_date,
+      category_code, description, direction, amount_aed, vat_amount_aed,
+      total_aed, sort_order,
+      booking_id, guest_name, check_in, check_out, nights, mgmt_fee_aed, mgmt_fee_vat_aed
+    ) values (
+      v_statement_id, r.id, r.unit_id,
+      coalesce(r.property_name || ' - ' || r.unit_number, 'Portfolio'),
+      r.entry_date, r.category_code, r.description, r.direction,
+      r.amount_aed, r.vat_amount_aed, r.total_aed, v_sort,
+      r.booking_id, r.b_guest, r.b_check_in, r.b_check_out, r.b_nights, v_line_fee, v_line_vat
+    );
+
+    update ledger_entries set statement_id = v_statement_id where id = r.id;
+  end loop;
+
+  -- Fixed-fee agreements (no percentage, none set by finance): one line per unit.
+  if p_fee_pct is null then
+    for r in
+      select ma.unit_id, ma.fixed_fee_aed, ma.fee_vat_applicable,
+             u.unit_number, p.name as property_name
+      from management_agreements ma
+      join units u on u.id = ma.unit_id
+      join properties p on p.id = u.property_id
+      where ma.owner_id = p_owner_id
+        and ma.is_active
+        and ma.start_date <= p_period_end
+        and ma.end_date >= p_period_start
+        and ma.commission_pct is null
+        and coalesce(ma.fixed_fee_aed, 0) > 0
+    loop
+      -- Management fee is a taxable supply of services: VAT normally applies.
+      v_line_fee := r.fixed_fee_aed;
+      v_line_vat := case when r.fee_vat_applicable then round(v_line_fee * v_vat_rate, 2) else 0 end;
+      v_fee      := v_fee + v_line_fee;
+      v_fee_vat  := v_fee_vat + v_line_vat;
+      v_sort     := v_sort + 1;
+
+      insert into owner_statement_lines (
+        statement_id, unit_id, unit_label, entry_date, category_code,
+        description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+      ) values (
+        v_statement_id, r.unit_id, r.property_name || ' - ' || r.unit_number,
+        p_period_end, 'EXP-MGMT-FEE', 'Management fee (fixed)',
+        'expense', v_line_fee, v_line_vat, v_line_fee + v_line_vat, v_sort
+      );
+    end loop;
+  end if;
+
+  -- Utility fees, one line each, as entered, with the expenses.
+  for v_item in select * from jsonb_array_elements(v_items) loop
+    v_amount := round((v_item->>'amount')::numeric, 2);
+    v_other  := v_other + v_amount;
+    v_sort   := v_sort + 1;
+    insert into owner_statement_lines (
+      statement_id, unit_label, entry_date, category_code,
+      description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+    ) values (
+      v_statement_id, 'Portfolio', p_period_end, 'EXP-OTHER-FEES',
+      trim(v_item->>'description'), 'expense', v_amount, 0, v_amount, v_sort
+    );
+  end loop;
+
+  -- Occupancy: nights booked inside the period on the owner's holiday-home
+  -- units, over the nights those units had in it. The ownership's start date
+  -- is not checked: it defaults to the day the owner was linked (0003).
+  select count(*) into v_units
+    from units u
+   where u.operating_mode in ('short_term', 'both')
+     and exists (select 1 from unit_ownerships uo
+                  where uo.unit_id = u.id and uo.owner_id = p_owner_id
+                    and (uo.end_date is null or uo.end_date >= p_period_start));
+  select coalesce(sum(greatest(0, least(b.check_out, p_period_end + 1)
+                                  - greatest(b.check_in, p_period_start))), 0)
+    into v_booked
+    from bookings b
+    join units u on u.id = b.unit_id
+   where u.operating_mode in ('short_term', 'both')
+     and b.status in ('confirmed', 'checked_in', 'checked_out')
+     and b.check_in <= p_period_end
+     and b.check_out > p_period_start
+     and exists (select 1 from unit_ownerships uo
+                  where uo.unit_id = u.id and uo.owner_id = p_owner_id
+                    and (uo.end_date is null or uo.end_date >= p_period_start));
+
+  -- Other fees: kept for staff (other_charges), never on the owner's
+  -- statement and not taken off the payout.
+  update owner_statements
+     set other_charges_aed  = v_hidden,
+         other_charges      = (select coalesce(jsonb_agg(jsonb_build_object(
+                                 'description', trim(x->>'description'),
+                                 'amount', round((x->>'amount')::numeric, 2))), '[]'::jsonb)
+                                 from jsonb_array_elements(v_charges) x),
+         gross_income_aed   = v_income,
+         total_expenses_aed = v_expense,
+         management_fee_aed = v_fee,
+         vat_total_aed      = v_fee_vat,
+         other_fees_aed     = v_other,
+         bookings_count     = (select count(distinct booking_id) from owner_statement_lines
+                                where statement_id = v_statement_id and direction = 'income'
+                                  and booking_id is not null),
+         rented_nights      = (select coalesce(sum(nights), 0) from owner_statement_lines
+                                where statement_id = v_statement_id and direction = 'income'
+                                  and booking_id is not null),
+         occupancy_pct      = case when v_units > 0 then
+                                least(100, round(v_booked * 100.0 / (v_units * (p_period_end - p_period_start + 1)), 1))
+                              end,
+         net_payout_aed     = v_income - v_expense - v_other - v_fee - v_fee_vat,
+         closing_balance_aed = v_income - v_expense - v_other - v_fee - v_fee_vat
+   where id = v_statement_id;
+
+  return v_statement_id;
+end;
+$$;
+
+revoke all on function generate_owner_statement(uuid, date, date, numeric, boolean, jsonb, jsonb) from public, anon;
+grant execute on function generate_owner_statement(uuid, date, date, numeric, boolean, jsonb, jsonb) to authenticated;
+
+
+-- Redo the postings in parts now, rather than at the next calendar sync.
+select post_completed_bookings();
+
+-- ####################################################################
+-- ## 0060_statement_approval.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0060 Owner statements: approved before they reach the owner
+--
+-- The office (operations) generates a statement and sends it for approval;
+-- the approver (Jasko) checks it and, on approving, sends it to the owner.
+--
+--   draft            generated; the office can still void or delete it
+--   draft, submitted waiting for the approver (submitted_at set)
+--   issued           approved and emailed to the owner (approved_*, sent_*)
+--   paid             the payout went out
+--
+--   * company_settings.statement_approver_id: who approves. Set to Jasko's
+--     login when one exists; without one, any super admin approves.
+--   * A statement leaves draft for issued only through the approver
+--     (pms.can_approve_statements), checked here as well as in the app.
+--   * Sending for approval notifies the approver - in the portal and on the
+--     phone (0051); approving notifies whoever sent it.
+-- ============================================================================
+
+alter table owner_statements
+  add column if not exists submitted_at timestamptz,
+  add column if not exists submitted_by uuid references profiles(id) on delete set null,
+  add column if not exists sent_at      timestamptz,
+  add column if not exists sent_to      text,
+  add column if not exists return_note  text check (return_note is null or length(return_note) <= 500);
+
+comment on column owner_statements.submitted_at is
+  'When the office sent this draft for approval; cleared if the approver sends it back.';
+comment on column owner_statements.sent_to is
+  'The owner''s email address the approved statement went to.';
+
+alter table company_settings
+  add column if not exists statement_approver_id uuid references profiles(id) on delete set null;
+
+comment on column company_settings.statement_approver_id is
+  'Approves owner statements before they go to the owner; any super admin when not set.';
+
+update company_settings
+   set statement_approver_id = (
+     select p.id from profiles p
+      where p.is_active and p.role = 'super_admin'
+        and (p.full_name ilike 'jasko%' or p.email ilike 'jasko%')
+      order by p.created_at
+      limit 1)
+ where id and statement_approver_id is null;
+
+
+create or replace function pms.can_approve_statements()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pms
+as $$
+  select exists (
+    select 1 from profiles p
+     where p.id = auth.uid() and p.is_active
+       and p.id = coalesce((select statement_approver_id from company_settings where id),
+                           case when p.role = 'super_admin' then p.id end)
+  );
+$$;
+
+create or replace function can_approve_statements()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pms
+as $$ select pms.can_approve_statements(); $$;
+
+revoke all on function can_approve_statements() from public, anon;
+grant execute on function can_approve_statements() to authenticated;
+
+
+-- Only the approver takes a statement out of draft to the owner.
+create or replace function pms.guard_statement_issue()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+begin
+  if old.status = 'draft' and new.status in ('issued', 'approved', 'paid')
+     and auth.uid() is not null and not pms.can_approve_statements() then
+    raise exception 'Only the statement approver can send a statement to the owner'
+      using errcode = 'insufficient_privilege';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists owner_statements_guard_issue on owner_statements;
+create trigger owner_statements_guard_issue
+  before update of status on owner_statements
+  for each row execute function pms.guard_statement_issue();
+
+
+-- ---------------------------------------------------------------------------
+-- Notifications
+-- ---------------------------------------------------------------------------
+alter table notifications drop constraint if exists notifications_kind_check;
+alter table notifications add constraint notifications_kind_check
+  check (kind in ('booking_new', 'booking_changed', 'booking_cancelled',
+                  'ticket_new', 'ticket_status', 'refund_new', 'refund_settled',
+                  'statement_review', 'statement_done'));
+
+create or replace function pms.notify_statement_event()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_actor uuid := auth.uid();
+  v_what  text;
+  v_link  text := '/finance/statements/' || new.id;
+begin
+  select new.statement_number || ' - ' || o.full_name || ', '
+         || to_char(new.period_start, 'DD Mon') || ' - ' || to_char(new.period_end, 'DD Mon YYYY')
+    into v_what
+    from owners o where o.id = new.owner_id;
+
+  -- Sent for approval: the approver, or every super admin when none is set.
+  if new.submitted_at is not null and old.submitted_at is null then
+    insert into notifications (recipient_id, kind, title, body, link)
+    select p.id, 'statement_review', 'Statement to approve', v_what, v_link
+      from profiles p
+     where p.is_active
+       and p.id is distinct from v_actor
+       and p.id = coalesce((select statement_approver_id from company_settings where id),
+                           case when p.role = 'super_admin' then p.id end);
+  end if;
+
+  -- Approved and sent, or sent back: whoever sent it for approval.
+  if new.submitted_by is not null and new.submitted_by is distinct from v_actor then
+    if new.status = 'issued' and old.status = 'draft' then
+      insert into notifications (recipient_id, kind, title, body, link)
+      values (new.submitted_by, 'statement_done', 'Statement approved and sent', v_what, v_link);
+    elsif new.submitted_at is null and old.submitted_at is not null and new.status = 'draft' then
+      insert into notifications (recipient_id, kind, title, body, link)
+      values (new.submitted_by, 'statement_done', 'Statement sent back',
+              v_what || coalesce(': ' || nullif(trim(new.return_note), ''), ''), v_link);
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists owner_statements_notify on owner_statements;
+create trigger owner_statements_notify
+  after update of status, submitted_at on owner_statements
+  for each row execute function pms.notify_statement_event();
+
+-- ####################################################################
+-- ## 0061_statement_deductions.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0061 Booking deductions, other fees as a %, the statement's name
+--
+--   * When generating, finance can take a deduction off any booking in the
+--     period - an amount, or a % of its rent. The owner's statement shows the
+--     rent after it (and the management fee is worked out on that); what was
+--     taken off stays with staff (owner_statement_lines.original_amount_aed,
+--     deduction_aed). The ledger keeps the full payout.
+--   * An other fee (0056, for our own figures) can be a % of the statement's
+--     booking income instead of an amount; the list keeps both.
+--   * company_settings.statement_legal_name: the company named on owner
+--     statements - DRP Holiday Homes LLC - where the rest of the portal uses
+--     legal_name.
+-- ============================================================================
+
+alter table owner_statement_lines
+  add column if not exists original_amount_aed numeric(14,2),
+  add column if not exists deduction_aed       numeric(14,2);
+
+comment on column owner_statement_lines.deduction_aed is
+  'Taken off this booking''s rent when the statement was generated (staff only); amount_aed is the rent after it.';
+
+alter table company_settings
+  add column if not exists statement_legal_name text not null default 'DRP Holiday Homes LLC'
+    check (length(trim(statement_legal_name)) between 2 and 200);
+
+comment on column company_settings.statement_legal_name is
+  'The company named on owner statements and the emails that send them.';
+
+drop function if exists generate_owner_statement(uuid, date, date, numeric, boolean, jsonb, jsonb);
+
+create or replace function generate_owner_statement(
+  p_owner_id        uuid,
+  p_period_start    date,
+  p_period_end      date,
+  p_fee_pct         numeric default null,
+  p_fee_vat         boolean default true,
+  p_other_items     jsonb default '[]'::jsonb,
+  p_other_charges   jsonb default '[]'::jsonb,
+  p_booking_adjustments jsonb default '[]'::jsonb
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_statement_id uuid;
+  v_income   numeric(14,2) := 0;
+  v_expense  numeric(14,2) := 0;
+  v_fee      numeric(14,2) := 0;
+  v_fee_vat  numeric(14,2) := 0;
+  v_other    numeric(14,2) := 0;
+  v_items    jsonb := coalesce(p_other_items, '[]'::jsonb);
+  v_item     jsonb;
+  v_amount   numeric(14,2);
+  v_charges  jsonb := coalesce(p_other_charges, '[]'::jsonb);
+  v_hidden   numeric(14,2) := 0;
+  v_vat_rate numeric(5,4);
+  v_sort     integer := 0;
+  v_pct      numeric;
+  v_with_vat boolean;
+  v_line_fee numeric(14,2);
+  v_line_vat numeric(14,2);
+  v_units    integer;
+  v_booked   integer;
+  v_adjust   jsonb := coalesce(p_booking_adjustments, '[]'::jsonb);
+  v_rent     numeric(14,2);
+  v_cut      numeric(14,2);
+  r          record;
+begin
+  if not pms.is_staff() and auth.uid() is not null then
+    raise exception 'Only staff can generate statements' using errcode = 'insufficient_privilege';
+  end if;
+  if p_fee_pct is not null and (p_fee_pct < 0 or p_fee_pct > 100) then
+    raise exception 'The management fee must be between 0%% and 100%%' using errcode = 'check_violation';
+  end if;
+  if jsonb_typeof(v_charges) <> 'array' then
+    raise exception 'Other fees must be a list' using errcode = 'invalid_parameter_value';
+  end if;
+  for v_item in select * from jsonb_array_elements(v_charges) loop
+    if length(trim(coalesce(v_item->>'description', ''))) not between 1 and 200
+       or ((v_item->>'amount') is null) = ((v_item->>'pct') is null)
+       or coalesce((v_item->>'amount')::numeric, 1) <= 0
+       or coalesce((v_item->>'pct')::numeric, 1) not between 0.01 and 100 then
+      raise exception 'Each other fee needs what it is for and an amount above 0, or a %% up to 100'
+        using errcode = 'check_violation';
+    end if;
+  end loop;
+
+  -- Booking deductions: one per income line at most, an amount or a %.
+  if jsonb_typeof(v_adjust) <> 'array' then
+    raise exception 'Booking deductions must be a list' using errcode = 'invalid_parameter_value';
+  end if;
+  for v_item in select * from jsonb_array_elements(v_adjust) loop
+    if (v_item->>'ledger_entry_id') is null
+       or ((v_item->>'amount') is null) = ((v_item->>'pct') is null)
+       or coalesce((v_item->>'amount')::numeric, 0) < 0
+       or coalesce((v_item->>'pct')::numeric, 0) not between 0 and 100 then
+      raise exception 'Each booking deduction needs an amount, or a %% up to 100'
+        using errcode = 'check_violation';
+    end if;
+  end loop;
+
+  if jsonb_typeof(v_items) <> 'array' then
+    raise exception 'Utility fees must be a list' using errcode = 'invalid_parameter_value';
+  end if;
+  for v_item in select * from jsonb_array_elements(v_items) loop
+    if length(trim(coalesce(v_item->>'description', ''))) not between 1 and 200
+       or (v_item->>'amount') is null or (v_item->>'amount')::numeric <= 0 then
+      raise exception 'Each utility fee needs what it is for and an amount above 0'
+        using errcode = 'check_violation';
+    end if;
+  end loop;
+
+  select coalesce(vat_rate, 0) into v_vat_rate from company_settings where id;
+  v_vat_rate := coalesce(v_vat_rate, 0);
+
+  if exists (
+    select 1 from owner_statements
+    where owner_id = p_owner_id
+      and period_start = p_period_start
+      and period_end = p_period_end
+      and status <> 'void'
+  ) then
+    raise exception 'A statement already exists for this owner and period';
+  end if;
+
+  insert into owner_statements (owner_id, period_start, period_end, status, created_by,
+                                management_fee_pct, fee_vat_applied, other_fees_aed, other_fees_note)
+  values (p_owner_id, p_period_start, p_period_end, 'draft', auth.uid(),
+          p_fee_pct, case when p_fee_pct is not null then p_fee_vat end, 0, null)
+  returning id into v_statement_id;
+
+  -- Snapshot every ledger entry on this owner's units for the period that has
+  -- not already been carried on another statement. Income lines carry their
+  -- stay and the management fee on them.
+  for r in
+    select le.*, gc.code as category_code, gc.affects_owner_statement,
+           u.unit_number, p.name as property_name,
+           b.check_in as b_check_in, b.check_out as b_check_out,
+           coalesce(le.stay_nights, b.nights) as b_nights,
+           coalesce(g.full_name,
+                    (select bg.full_name from booking_guests bg
+                      where bg.booking_id = b.id
+                      order by bg.is_lead_guest desc, bg.created_at limit 1)) as b_guest,
+           ma.commission_pct as ma_pct, ma.fee_vat_applicable as ma_vat
+    from ledger_entries le
+    join gl_categories gc on gc.id = le.category_id
+    left join units u on u.id = le.unit_id
+    left join properties p on p.id = u.property_id
+    left join bookings b on b.id = le.booking_id
+    left join guests g on g.id = b.guest_id
+    left join lateral (
+      select m.commission_pct, m.fee_vat_applicable
+        from management_agreements m
+       where m.unit_id = le.unit_id
+         and m.owner_id = p_owner_id
+         and m.is_active
+         and m.start_date <= p_period_end
+         and m.end_date >= p_period_start
+       order by m.start_date desc
+       limit 1
+    ) ma on true
+    where le.owner_id = p_owner_id
+      and le.entry_date between p_period_start and p_period_end
+      and le.statement_id is null
+      and le.is_owner_visible
+      and gc.affects_owner_statement
+      and gc.code <> 'EXP-MGMT-FEE'      -- the fee is computed here, not copied
+    order by le.entry_date, le.created_at
+  loop
+    v_sort := v_sort + 1;
+    v_line_fee := null;
+    v_line_vat := null;
+
+    v_rent := r.amount_aed;
+    v_cut  := null;
+    if r.direction = 'income' then
+      -- A deduction finance entered for this booking: the owner's statement
+      -- shows the rent after it.
+      select coalesce(round((a->>'amount')::numeric, 2), round(r.amount_aed * (a->>'pct')::numeric / 100.0, 2))
+        into v_cut
+        from jsonb_array_elements(v_adjust) a
+       where (a->>'ledger_entry_id')::uuid = r.id
+       limit 1;
+      if v_cut > r.amount_aed then
+        raise exception 'A booking deduction of AED % is more than its rent of AED %', v_cut, r.amount_aed
+          using errcode = 'check_violation';
+      end if;
+      v_rent   := r.amount_aed - coalesce(v_cut, 0);
+      v_income := v_income + v_rent;
+      v_pct      := coalesce(p_fee_pct, r.ma_pct);
+      v_with_vat := case when p_fee_pct is not null then p_fee_vat else coalesce(r.ma_vat, false) end;
+      if v_pct is not null then
+        v_line_fee := round(v_rent * v_pct / 100.0, 2);
+        v_line_vat := case when v_with_vat then round(v_line_fee * v_vat_rate, 2) else 0 end;
+        v_fee      := v_fee + v_line_fee;
+        v_fee_vat  := v_fee_vat + v_line_vat;
+      end if;
+    else
+      v_expense := v_expense + r.total_aed;
+    end if;
+
+    insert into owner_statement_lines (
+      statement_id, ledger_entry_id, unit_id, unit_label, entry_date,
+      category_code, description, direction, amount_aed, vat_amount_aed,
+      total_aed, sort_order,
+      booking_id, guest_name, check_in, check_out, nights, mgmt_fee_aed, mgmt_fee_vat_aed,
+      original_amount_aed, deduction_aed
+    ) values (
+      v_statement_id, r.id, r.unit_id,
+      coalesce(r.property_name || ' - ' || r.unit_number, 'Portfolio'),
+      r.entry_date, r.category_code, r.description, r.direction,
+      v_rent, r.vat_amount_aed, case when r.direction = 'income' then v_rent else r.total_aed end, v_sort,
+      r.booking_id, r.b_guest, r.b_check_in, r.b_check_out, r.b_nights, v_line_fee, v_line_vat,
+      case when v_cut is not null then r.amount_aed end, v_cut
+    );
+
+    update ledger_entries set statement_id = v_statement_id where id = r.id;
+  end loop;
+
+  -- Fixed-fee agreements (no percentage, none set by finance): one line per unit.
+  if p_fee_pct is null then
+    for r in
+      select ma.unit_id, ma.fixed_fee_aed, ma.fee_vat_applicable,
+             u.unit_number, p.name as property_name
+      from management_agreements ma
+      join units u on u.id = ma.unit_id
+      join properties p on p.id = u.property_id
+      where ma.owner_id = p_owner_id
+        and ma.is_active
+        and ma.start_date <= p_period_end
+        and ma.end_date >= p_period_start
+        and ma.commission_pct is null
+        and coalesce(ma.fixed_fee_aed, 0) > 0
+    loop
+      -- Management fee is a taxable supply of services: VAT normally applies.
+      v_line_fee := r.fixed_fee_aed;
+      v_line_vat := case when r.fee_vat_applicable then round(v_line_fee * v_vat_rate, 2) else 0 end;
+      v_fee      := v_fee + v_line_fee;
+      v_fee_vat  := v_fee_vat + v_line_vat;
+      v_sort     := v_sort + 1;
+
+      insert into owner_statement_lines (
+        statement_id, unit_id, unit_label, entry_date, category_code,
+        description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+      ) values (
+        v_statement_id, r.unit_id, r.property_name || ' - ' || r.unit_number,
+        p_period_end, 'EXP-MGMT-FEE', 'Management fee (fixed)',
+        'expense', v_line_fee, v_line_vat, v_line_fee + v_line_vat, v_sort
+      );
+    end loop;
+  end if;
+
+  -- Utility fees, one line each, as entered, with the expenses.
+  for v_item in select * from jsonb_array_elements(v_items) loop
+    v_amount := round((v_item->>'amount')::numeric, 2);
+    v_other  := v_other + v_amount;
+    v_sort   := v_sort + 1;
+    insert into owner_statement_lines (
+      statement_id, unit_label, entry_date, category_code,
+      description, direction, amount_aed, vat_amount_aed, total_aed, sort_order
+    ) values (
+      v_statement_id, 'Portfolio', p_period_end, 'EXP-OTHER-FEES',
+      trim(v_item->>'description'), 'expense', v_amount, 0, v_amount, v_sort
+    );
+  end loop;
+
+  -- Occupancy: nights booked inside the period on the owner's holiday-home
+  -- units, over the nights those units had in it. The ownership's start date
+  -- is not checked: it defaults to the day the owner was linked (0003).
+  select count(*) into v_units
+    from units u
+   where u.operating_mode in ('short_term', 'both')
+     and exists (select 1 from unit_ownerships uo
+                  where uo.unit_id = u.id and uo.owner_id = p_owner_id
+                    and (uo.end_date is null or uo.end_date >= p_period_start));
+  select coalesce(sum(greatest(0, least(b.check_out, p_period_end + 1)
+                                  - greatest(b.check_in, p_period_start))), 0)
+    into v_booked
+    from bookings b
+    join units u on u.id = b.unit_id
+   where u.operating_mode in ('short_term', 'both')
+     and b.status in ('confirmed', 'checked_in', 'checked_out')
+     and b.check_in <= p_period_end
+     and b.check_out > p_period_start
+     and exists (select 1 from unit_ownerships uo
+                  where uo.unit_id = u.id and uo.owner_id = p_owner_id
+                    and (uo.end_date is null or uo.end_date >= p_period_start));
+
+  -- Other fees: kept for staff (other_charges), never on the owner's
+  -- statement and not taken off the payout.
+  -- Other fees: as entered, or a % of the statement's booking income.
+  select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+           'description', trim(x->>'description'),
+           'pct', (x->>'pct')::numeric,
+           'amount', coalesce(round((x->>'amount')::numeric, 2),
+                              round(v_income * (x->>'pct')::numeric / 100.0, 2))))), '[]'::jsonb)
+    into v_charges
+    from jsonb_array_elements(v_charges) x;
+  select coalesce(sum((x->>'amount')::numeric), 0) into v_hidden from jsonb_array_elements(v_charges) x;
+
+  update owner_statements
+     set other_charges_aed  = v_hidden,
+         other_charges      = v_charges,
+         gross_income_aed   = v_income,
+         total_expenses_aed = v_expense,
+         management_fee_aed = v_fee,
+         vat_total_aed      = v_fee_vat,
+         other_fees_aed     = v_other,
+         bookings_count     = (select count(distinct booking_id) from owner_statement_lines
+                                where statement_id = v_statement_id and direction = 'income'
+                                  and booking_id is not null),
+         rented_nights      = (select coalesce(sum(nights), 0) from owner_statement_lines
+                                where statement_id = v_statement_id and direction = 'income'
+                                  and booking_id is not null),
+         occupancy_pct      = case when v_units > 0 then
+                                least(100, round(v_booked * 100.0 / (v_units * (p_period_end - p_period_start + 1)), 1))
+                              end,
+         net_payout_aed     = v_income - v_expense - v_other - v_fee - v_fee_vat,
+         closing_balance_aed = v_income - v_expense - v_other - v_fee - v_fee_vat
+   where id = v_statement_id;
+
+  return v_statement_id;
+end;
+$$;
+
+revoke all on function generate_owner_statement(uuid, date, date, numeric, boolean, jsonb, jsonb, jsonb) from public, anon;
+grant execute on function generate_owner_statement(uuid, date, date, numeric, boolean, jsonb, jsonb, jsonb) to authenticated;
+
+notify pgrst, 'reload schema';
+
+-- ####################################################################
+-- ## 0062_refund_payment_proof.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0062 Refunds: the payment receipt
+--
+-- Whoever pays a refund back (a super admin) can add proof of the payment -
+-- the bank transfer's screenshot, a photo of the cash receipt, a PDF - so the
+-- person who claimed can see it was paid. It sits beside the claim's own
+-- receipt in the private documents bucket (refund/<id>/<file>), staff only,
+-- and super admins already have the update rights it needs (0052).
+-- ============================================================================
+
+alter table refunds
+  add column if not exists payment_proof_path text;
+
+comment on column refunds.payment_proof_path is
+  'Proof the refund was paid back (transfer screenshot, receipt): refund/<id>/<file> in the documents bucket.';
+
+-- ####################################################################
+-- ## 0063_notifications_follow_deletes.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0063 Notifications go when what they are about goes
+--
+-- Booking and ticket notifications already carry their booking_id / ticket_id
+-- and disappear with them (on delete cascade). Refund claims and owner
+-- statements did not: deleting a claim or a statement removed it, but the
+-- "Refund claim" / "Statement to approve" notifications it had sent stayed in
+-- everyone else's list. They now carry refund_id / statement_id the same way,
+-- and the ones left behind by claims and statements already deleted are
+-- removed here.
+-- ============================================================================
+
+alter table notifications
+  add column if not exists refund_id uuid references refunds(id) on delete cascade,
+  add column if not exists statement_id uuid references owner_statements(id) on delete cascade;
+
+create index if not exists notifications_refund_idx on notifications(refund_id) where refund_id is not null;
+create index if not exists notifications_statement_idx on notifications(statement_id) where statement_id is not null;
+
+-- ---------------------------------------------------------------------------
+-- The triggers record what each notification is about (otherwise as 0052, 0060)
+-- ---------------------------------------------------------------------------
+create or replace function pms.notify_refund_event()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_actor  uuid := auth.uid();
+  v_amount text := 'AED ' || to_char(new.amount_aed, 'FM999,999,990.00');
+begin
+  if tg_op = 'INSERT' then
+    insert into notifications (recipient_id, kind, title, body, link, refund_id)
+    select p.id, 'refund_new',
+           'Refund claim: ' || v_amount,
+           new.spent_by || ' paid for ' || new.description,
+           '/refunds', new.id
+      from profiles p
+     where p.is_active
+       and p.role in ('super_admin', 'finance')
+       and p.id is distinct from v_actor;
+  elsif new.status <> old.status and new.status in ('refunded', 'rejected')
+        and new.created_by is not null and new.created_by is distinct from v_actor then
+    insert into notifications (recipient_id, kind, title, body, link, refund_id)
+    values (new.created_by, 'refund_settled',
+            case new.status when 'refunded' then 'Refunded: ' else 'Refund declined: ' end || v_amount,
+            new.spent_by || ' - ' || new.description
+              || coalesce(' (' || nullif(trim(new.settle_note), '') || ')', ''),
+            '/refunds', new.id);
+  end if;
+  return new;
+end;
+$$;
+
+
+create or replace function pms.notify_statement_event()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pms
+as $$
+declare
+  v_actor uuid := auth.uid();
+  v_what  text;
+  v_link  text := '/finance/statements/' || new.id;
+begin
+  select new.statement_number || ' - ' || o.full_name || ', '
+         || to_char(new.period_start, 'DD Mon') || ' - ' || to_char(new.period_end, 'DD Mon YYYY')
+    into v_what
+    from owners o where o.id = new.owner_id;
+
+  -- Sent for approval: the approver, or every super admin when none is set.
+  if new.submitted_at is not null and old.submitted_at is null then
+    insert into notifications (recipient_id, kind, title, body, link, statement_id)
+    select p.id, 'statement_review', 'Statement to approve', v_what, v_link, new.id
+      from profiles p
+     where p.is_active
+       and p.id is distinct from v_actor
+       and p.id = coalesce((select statement_approver_id from company_settings where id),
+                           case when p.role = 'super_admin' then p.id end);
+  end if;
+
+  -- Approved and sent, or sent back: whoever sent it for approval.
+  if new.submitted_by is not null and new.submitted_by is distinct from v_actor then
+    if new.status = 'issued' and old.status = 'draft' then
+      insert into notifications (recipient_id, kind, title, body, link, statement_id)
+      values (new.submitted_by, 'statement_done', 'Statement approved and sent', v_what, v_link, new.id);
+    elsif new.submitted_at is null and old.submitted_at is not null and new.status = 'draft' then
+      insert into notifications (recipient_id, kind, title, body, link, statement_id)
+      values (new.submitted_by, 'statement_done', 'Statement sent back',
+              v_what || coalesce(': ' || nullif(trim(new.return_note), ''), ''), v_link, new.id);
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- Existing notifications: link them to their claim or statement, and remove
+-- the ones whose claim or statement is gone.
+-- ---------------------------------------------------------------------------
+
+-- Statements: the link ends in the statement's id.
+update notifications n
+   set statement_id = s.id
+  from owner_statements s
+ where n.kind in ('statement_review', 'statement_done')
+   and n.statement_id is null
+   and n.link = '/finance/statements/' || s.id;
+
+delete from notifications
+ where kind in ('statement_review', 'statement_done')
+   and statement_id is null;
+
+-- Refunds: the text names who paid and what for (0052).
+update notifications n
+   set refund_id = r.id
+  from refunds r
+ where n.kind = 'refund_new'
+   and n.refund_id is null
+   and n.body = r.spent_by || ' paid for ' || r.description;
+
+update notifications n
+   set refund_id = r.id
+  from refunds r
+ where n.kind = 'refund_settled'
+   and n.refund_id is null
+   and n.recipient_id = r.created_by
+   and (n.body = r.spent_by || ' - ' || r.description
+        or n.body like r.spent_by || ' - ' || r.description || ' (%');
+
+delete from notifications
+ where kind in ('refund_new', 'refund_settled')
+   and refund_id is null;
