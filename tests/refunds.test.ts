@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { REFUND_PEOPLE, isPdf, receiptPath, receiptProblem, refundImageName, refundReference } from "@/lib/refunds";
+import {
+  REFUND_PEOPLE,
+  isPdf,
+  paymentProofPath,
+  receiptPath,
+  receiptProblem,
+  refundImageName,
+  refundReference,
+} from "@/lib/refunds";
 import { wrapText } from "@/lib/refund-image";
 import { can } from "@/lib/auth/rbac";
 
@@ -11,6 +19,12 @@ test("receipts: photos and PDFs up to 4 MB", () => {
   assert.match(receiptProblem({ name: "big.jpg", type: "image/jpeg", size: 5 * 1024 * 1024 })!, /larger than 4 MB/);
   assert.equal(receiptPath("abc", "application/pdf", 1), "refund/abc/1-receipt.pdf");
   assert.ok(isPdf(receiptPath("abc", "application/pdf")));
+});
+
+test("the payment receipt sits beside the claim's receipt, under its own name", () => {
+  assert.equal(paymentProofPath("abc", "image/png", 1), "refund/abc/1-payment.png");
+  assert.equal(paymentProofPath("abc", "application/pdf", 2), "refund/abc/2-payment.pdf");
+  assert.notEqual(paymentProofPath("abc", "image/jpeg", 1), receiptPath("abc", "image/jpeg", 1));
 });
 
 test("every staff member sees refunds; only super admins settle; owners neither", () => {

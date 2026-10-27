@@ -1,13 +1,29 @@
 "use client";
 
 import * as React from "react";
-import { Check, RotateCcw, Trash2, X } from "lucide-react";
+import { Check, ImagePlus, RotateCcw, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { deleteRefund, settleRefund } from "./actions";
+import { PaidDialog } from "./paid-dialog";
 
-/** Super admins: refunded / declined, back to waiting, or delete a mistake. */
-export function SettleButtons({ refundId, status }: { refundId: string; status: string }) {
+/**
+ * Super admins: refunded (with the payment receipt) / declined, back to
+ * waiting, or delete a mistake.
+ */
+export function SettleButtons({
+  refundId,
+  status,
+  spentBy,
+  amount,
+  hasProof,
+}: {
+  refundId: string;
+  status: string;
+  spentBy: string;
+  amount: number | string;
+  hasProof: boolean;
+}) {
   const [pending, start] = React.useTransition();
 
   const settle = (next: "refunded" | "rejected" | "pending", note?: string) =>
@@ -24,10 +40,17 @@ export function SettleButtons({ refundId, status }: { refundId: string; status: 
     <div className="flex flex-wrap justify-end gap-1.5">
       {status === "pending" ? (
         <>
-          <Button type="button" size="sm" disabled={pending} onClick={() => settle("refunded")}>
-            <Check className="size-4" />
-            Refunded
-          </Button>
+          <PaidDialog
+            refundId={refundId}
+            spentBy={spentBy}
+            amount={amount}
+            trigger={
+              <Button type="button" size="sm" disabled={pending}>
+                <Check className="size-4" />
+                Refunded
+              </Button>
+            }
+          />
           <Button
             type="button"
             size="sm"
@@ -43,10 +66,26 @@ export function SettleButtons({ refundId, status }: { refundId: string; status: 
           </Button>
         </>
       ) : (
-        <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => settle("pending")}>
-          <RotateCcw className="size-4" />
-          Undo
-        </Button>
+        <>
+          {status === "refunded" && (
+            <PaidDialog
+              refundId={refundId}
+              spentBy={spentBy}
+              amount={amount}
+              settled
+              trigger={
+                <Button type="button" size="sm" variant="outline" disabled={pending}>
+                  <ImagePlus className="size-4" />
+                  {hasProof ? "Replace receipt" : "Payment receipt"}
+                </Button>
+              }
+            />
+          )}
+          <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => settle("pending")}>
+            <RotateCcw className="size-4" />
+            Undo
+          </Button>
+        </>
       )}
       <Button
         type="button"

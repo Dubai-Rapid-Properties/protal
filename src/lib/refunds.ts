@@ -40,6 +40,11 @@ export function receiptPath(refundId: string, type: string, now = Date.now()): s
   return `refund/${refundId}/${now}-receipt.${RECEIPT_EXTENSIONS[type] ?? "jpg"}`;
 }
 
+/** Where the proof that a claim was paid back lives, beside its receipt. */
+export function paymentProofPath(refundId: string, type: string, now = Date.now()): string {
+  return `refund/${refundId}/${now}-payment.${RECEIPT_EXTENSIONS[type] ?? "jpg"}`;
+}
+
 export const isPdf = (path: string) => path.toLowerCase().endsWith(".pdf");
 
 /** The short reference printed on a refund's confirmation image. */

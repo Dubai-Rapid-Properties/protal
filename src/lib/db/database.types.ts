@@ -4569,6 +4569,7 @@ export type Database = {
           amount_aed: number;
           spent_on: string;
           receipt_path: string | null;
+          payment_proof_path: string | null;
           status: string;
           settled_on: string | null;
           settled_by: string | null;
@@ -4583,6 +4584,7 @@ export type Database = {
           amount_aed: number;
           spent_on?: string;
           receipt_path?: string | null;
+          payment_proof_path?: string | null;
           status?: string;
           settled_on?: string | null;
           settled_by?: string | null;
@@ -4597,6 +4599,7 @@ export type Database = {
           amount_aed?: number;
           spent_on?: string;
           receipt_path?: string | null;
+          payment_proof_path?: string | null;
           status?: string;
           settled_on?: string | null;
           settled_by?: string | null;
