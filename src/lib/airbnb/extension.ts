@@ -78,11 +78,17 @@ function airbnbScript(adminUrl: string): string {
     chrome.runtime.sendMessage({ open: PORTAL + path + "#" + encodeURIComponent(JSON.stringify(data)) });
   }
 
+  // After the extension is updated or reloaded, a page opened before can no longer reach it.
+  function isStale(e) {
+    return /context invalidated|Extension context|Receiving end does not exist/i.test(String(e && e.message));
+  }
+  var RELOAD = "the extension was updated: reload this Airbnb page (F5), then try again.";
+
   function importListing() {
     try {
       open("/units/from-airbnb", collectAirbnbListing(document, location.href, true));
     } catch (e) {
-      alert("D|R|P could not read this page. Use copy and paste on the portal's Import from Airbnb page instead.");
+      alert(isStale(e) ? "D|R|P: " + RELOAD : "D|R|P could not read this page (" + String(e && e.message).slice(0, 200) + "). Use copy and paste on the portal's Import from Airbnb page instead, and tell the portal's admin this message.");
     }
   }
 
@@ -120,7 +126,15 @@ function airbnbScript(adminUrl: string): string {
     if (autoOff || sending || !isListingHostPage()) return;
     lastRun = Date.now();
     var d;
-    try { d = collectAirbnbListing(document, location.href, true); } catch (e) { return; }
+    try {
+      d = collectAirbnbListing(document, location.href, true);
+    } catch (e) {
+      // Said once per kind of failure, not every few seconds.
+      var why = "read:" + String(e && e.message);
+      if (why !== lastSig) note("could not read this page's prices (" + String(e && e.message).slice(0, 200) + ").", true);
+      lastSig = why;
+      return;
+    }
     var sig = signature(d);
     if (sig === lastSig) return;
     if (!Object.keys(d.prices).length && !d.nights.length && !/AED|د\\.إ|USD|\\$|€|£/.test(d.text)) return;
@@ -136,25 +150,36 @@ function airbnbScript(adminUrl: string): string {
       })
       .catch(function () {})
       .then(function () {
-        chrome.runtime.sendMessage({ sync: d }, function (res) {
+        try {
+          chrome.runtime.sendMessage({ sync: d }, answered);
+        } catch (e) {
+          sending = false;
+          autoOff = true;
+          note(isStale(e) ? RELOAD : "could not send the prices (" + String(e && e.message).slice(0, 200) + ").", true);
+        }
+        function answered(res) {
           sending = false;
           if (chrome.runtime.lastError || !res) {
             lastSig = "";
-            return note("D|R|P could not send the prices. Reload this page to try again.", true);
+            return note(RELOAD, true);
           }
           if (res.status === "saved") note("Prices saved to " + res.unit + ": " + res.changes.join(", ") + ". The website follows within minutes.");
           else if (res.status === "unchanged") note("Prices match " + res.unit + " in the portal.");
           else {
             // Sent again once the page changes (or after signing in, on the next change).
             if (res.status === "signin" || res.status === "error") lastSig = "";
-            note(res.message || "D|R|P could not save the prices.", true);
+            note(res.message || "could not save the prices.", true);
           }
-        });
+        }
       });
   }
 
   function sendReservation() {
-    open("/bookings/from-airbnb", { u: location.href, t: String(document.body.innerText || "").slice(0, 60000) });
+    try {
+      open("/bookings/from-airbnb", { u: location.href, t: String(document.body.innerText || "").slice(0, 60000) });
+    } catch (e) {
+      alert(isStale(e) ? "D|R|P: " + RELOAD : "D|R|P could not send this reservation (" + String(e && e.message).slice(0, 200) + ").");
+    }
   }
 
   // A reservation's page sends the reservation; anything else is a listing,
