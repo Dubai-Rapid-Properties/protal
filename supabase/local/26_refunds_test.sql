@@ -69,6 +69,17 @@ begin
   if n <> 1 then raise exception 'TEST 262 FAILED: % settle notifications', n; end if;
   raise notice 'TEST 262 PASS  a super admin settles; the claimant is notified';
 
+  -- TEST 263 - deleting a claim takes its notifications with it, for everyone.
+  select count(*) into n from notifications where refund_id = v_id;
+  if n <> 3 then raise exception 'TEST 263 FAILED: % notifications carry the claim', n; end if;
+  perform pg_temp.as_user(admin);
+  delete from refunds where id = v_id;
+  perform pg_temp.as_postgres();
+  select count(*) into n from notifications
+   where kind in ('refund_new', 'refund_settled') and body like 'Delia%Cleaning supplies%';
+  if n <> 0 then raise exception 'TEST 263 FAILED: % notifications outlived the claim', n; end if;
+  raise notice 'TEST 263 PASS  deleting a claim removes its notifications for everyone';
+
   delete from notifications where kind in ('refund_new', 'refund_settled');
   delete from refunds where id = v_id;
 end $$;
