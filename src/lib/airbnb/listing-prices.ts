@@ -10,6 +10,7 @@
  * value may be missing.
  */
 import { amountIn, parseDateText } from "@/lib/airbnb/reservation-page";
+import { readCalendarDays } from "@/lib/airbnb/calendar-days";
 import type { ListingPrices } from "@/lib/ical/listings";
 
 export interface AirbnbPrices extends Required<{ [K in keyof ListingPrices]: number | null }> {
@@ -17,6 +18,8 @@ export interface AirbnbPrices extends Required<{ [K in keyof ListingPrices]: num
   currency: string | null;
   /** Per-night prices from the calendar, by date (yyyy-mm-dd). */
   nights: { date: string; price: number }[];
+  /** What the calendar's month grids gave ("Dec 2026: 31 days, 27 priced"), when the page had them. */
+  calendar?: string;
 }
 
 export const NO_PRICES: AirbnbPrices = {
@@ -97,7 +100,11 @@ const DIRHAM =
 /** Text with right-to-left marks gone and dirhams written "AED": "386د.إ" → "386 AED ". */
 export const plainMoney = (text: string) => text.replace(BIDI, "").replace(DIRHAM, " AED ");
 
-function fromText(text: string): { values: Partial<Record<Field, number>>; currency: string | null } {
+/**
+ * `calendar`: on the host calendar every day carries a "Nightly price" label of its own, so only
+ * the side panel's lines ("229 د.إ per night") are read there.
+ */
+function fromText(text: string, calendar = false): { values: Partial<Record<Field, number>>; currency: string | null } {
   const lines = plainMoney(text)
     .replace(/\r\n?/g, "\n")
     .split("\n")
@@ -105,7 +112,7 @@ function fromText(text: string): { values: Partial<Record<Field, number>>; curre
     .filter(Boolean);
   const values: Partial<Record<Field, number>> = {};
   let currency: string | null = null;
-  for (let i = 0; i < lines.length; i++) {
+  for (let i = 0; i < lines.length && !calendar; i++) {
     for (const { field, label, not, percent } of LABELS) {
       if (values[field] !== undefined || !label.test(lines[i]) || not?.test(lines[i])) continue;
       // The label's own line (after the label), then the next three.
@@ -179,12 +186,14 @@ export function parseAirbnbPrices(sent: unknown, today: string): AirbnbPrices {
   // month grid on screen.
   const calendar = /\/(multicalendar|hosting\/calendar)\b/i.test(url ?? "");
   const j = (!calendar && s.prices && typeof s.prices === "object" ? s.prices : {}) as Record<string, unknown>;
-  const t = fromText(text);
+  const t = fromText(text, calendar);
   const pick = (a: number | null, b: number | undefined) => a ?? b ?? null;
 
   const currencies = new Set<string>();
   const nights = new Map<string, number>();
-  const labels = [...(Array.isArray(s.shown) ? s.shown : []), ...(!calendar && Array.isArray(s.nights) ? s.nights : [])];
+  // The month grids (extension 1.7+), then, on one listing's own pages, the labelled days.
+  const grids = Array.isArray(s.months) ? readCalendarDays(s.months) : null;
+  const labels = [...(grids?.labels ?? []), ...(!calendar && Array.isArray(s.nights) ? s.nights : [])];
   {
     for (const raw of labels.slice(0, 500)) {
       if (typeof raw !== "string") continue;
@@ -206,6 +215,7 @@ export function parseAirbnbPrices(sent: unknown, today: string): AirbnbPrices {
     weeklyDiscount: pick(discount(j.weeklyFactor, true), t.values.weeklyDiscount),
     monthlyDiscount: pick(discount(j.monthlyFactor, true), t.values.monthlyDiscount),
     nights: [...nights].map(([date, price]) => ({ date, price })).sort((a, b) => a.date.localeCompare(b.date)),
+    ...(grids && { calendar: grids.report }),
   };
 }
 

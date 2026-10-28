@@ -23,8 +23,8 @@ import type { TablesUpdate } from "@/lib/db/database.types";
 const MAX_BODY = 500_000;
 
 export type SyncAnswer =
-  | { status: "saved"; unit: string; changes: string[]; nights: number }
-  | { status: "unchanged"; unit: string; nights: number }
+  | { status: "saved"; unit: string; changes: string[]; nights: number; calendar?: string }
+  | { status: "unchanged"; unit: string; nights: number; calendar?: string }
   | { status: "skipped" | "signin" | "error"; message: string };
 
 const answer = (body: SyncAnswer, status = 200) =>
@@ -123,7 +123,8 @@ export async function POST(request: Request) {
   }
   // How many calendar days were read, so staff can see their per-night prices arrive.
   const nights = prices.nights.length;
-  if (!plan.changes.length) return answer({ status: "unchanged", unit: label, nights });
+  const calendar = prices.calendar;
+  if (!plan.changes.length) return answer({ status: "unchanged", unit: label, nights, calendar });
 
   const change: TablesUpdate<"units"> = {};
   for (const [field, value] of Object.entries(plan.rates)) change[RATE_COLUMNS[field as RateField]] = value;
@@ -134,5 +135,5 @@ export async function POST(request: Request) {
   if (!data?.length) return answer({ status: "skipped", message: "Your portal account cannot change this unit." }, 403);
   console.info(`[airbnb-sync] ${profile.id} updated ${label} (listing ${listingId}): ${plan.changes.join("; ")}`);
   revalidatePath(`/units/${u.id}`);
-  return answer({ status: "saved", unit: label, changes: plan.changes, nights });
+  return answer({ status: "saved", unit: label, changes: plan.changes, nights, calendar });
 }

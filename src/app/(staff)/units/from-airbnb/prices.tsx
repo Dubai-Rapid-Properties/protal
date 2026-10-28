@@ -142,6 +142,9 @@ function PricesForm({ found, unit }: { found: Found; unit: UnitPrices }) {
         })}
       </FormSection>
 
+      {prices.calendar && (
+        <p className="text-xs text-[var(--muted-foreground)]">Read from the Airbnb calendar: {prices.calendar}.</p>
+      )}
       {rows.length > 0 && (
         <FormSection
           title="Seasonal rates on the website"

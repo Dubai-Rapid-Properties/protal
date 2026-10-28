@@ -36,8 +36,11 @@ test("reads the calendar's side panel, value first", () => {
 });
 
 test("the Pricing page's labels still win over the panel's lines", () => {
-  const p = parseAirbnbPrices({ u: CALENDAR, text: "Nightly price\nAED 450\nAED 521 per night" }, TODAY);
+  const p = parseAirbnbPrices({ u: EDITOR, text: "Nightly price\nAED 450\nAED 521 per night" }, TODAY);
   assert.equal(p.nightly, 450);
+  // On the calendar every day has a "Nightly price" of its own: only the side panel counts there.
+  const c = parseAirbnbPrices({ u: CALENDAR, text: "1\nNightly priceﺩ.ﺇ386\nPricing\nﺩ.ﺇ\u00a0229 per night" }, TODAY);
+  assert.deepEqual([c.currency, c.nightly], ["AED", 229]);
 });
 
 test("an amount with dirhams after it", () => {
@@ -84,7 +87,7 @@ test("the calendar counts only its side panel and month grid, not other listings
       // Another listing's settings and days, kept in the multi-listing calendar's page.
       prices: { nightly: 185, currency: "AED" },
       nights: ["Wednesday, October 28, 2026, د.إ343", "Thursday, October 29, 2026, د.إ185"],
-      shown: ["2026-12-28 900د.إ"],
+      months: [{ name: "December 2026", days: [["Monday 28 Dec", "28", "Nightly price", "\uFEA9.\uFE87900"]] }],
     },
     TODAY
   );
@@ -137,4 +140,37 @@ test("the price sync gets the whole page; the address hand-over is trimmed", () 
   assert.equal(parseAirbnbPrices(posted, TODAY).nightly, 229);
   const handed = collectAirbnbListing(fakeDoc([], text), CALENDAR, true);
   assert.ok(handed.text.length < posted.text.length);
+});
+
+// Month grids as the extension collects them from Airbnb's calendar (Calendar → Month), in the
+// real page's format: the day's own label, its number, and "Nightly price" with dirhams first.
+test("reads the calendar's month grids", () => {
+  const AED = "ﺩ.ﺇ";
+  const months = [
+    {
+      name: "December 2026",
+      days: [
+        ["Contains a note", "Tuesday 1 Dec", "1", "Unavailable", "Nightly price", `${AED}415`],
+        ["Wednesday 2 Dec", "2"], // booked: no price shown
+        ["Sunday 13 Dec", "13", "Nightly price", `${AED}350`],
+        ["Monday 28 Dec", "28", "Nightly price", `${AED}900`, "1-night minimum"],
+      ],
+    },
+    { name: "January 2027", days: [["Friday 1 Jan", "1", "Nightly price", `${AED}900`]] },
+    // A grid whose days do not fall on its year's weekdays is left out, not guessed.
+    { name: "March 2027", days: [["Tuesday 1 Mar", "1", "Nightly price", `${AED}999`]] },
+  ];
+  const p = parseAirbnbPrices({ u: CALENDAR, text: `Pricing\n${AED} 229 per night`, months }, TODAY);
+  assert.deepEqual(p.nights, [
+    { date: "2026-12-01", price: 415 },
+    { date: "2026-12-13", price: 350 },
+    { date: "2026-12-28", price: 900 },
+    { date: "2027-01-01", price: 900 },
+  ]);
+  assert.equal(p.currency, "AED");
+  assert.equal(p.nightly, 229);
+  assert.equal(
+    p.calendar,
+    'Dec 2026: 4 days, 3 priced; Jan 2027: 1 days, 1 priced; Mar 2027: left out ("Tuesday 1 Mar" is not in Mar 2027)'
+  );
 });

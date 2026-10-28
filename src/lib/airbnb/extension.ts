@@ -110,7 +110,7 @@ function airbnbScript(adminUrl: string): string {
   // the calendar's night labels and the lines of text that carry an amount.
   function signature(d) {
     var lines = String(d.text || "").split("\\n").filter(function (l) { return /\\d/.test(l) && /AED|[\\u0600-\\u06FF\\uFE70-\\uFEFF]|\\u20C3|USD|\\$|€|£|%/.test(l); });
-    return JSON.stringify([location.pathname, d.prices, d.nights, d.shown, lines]);
+    return JSON.stringify([location.pathname, d.prices, d.nights, d.months, lines]);
   }
 
   function schedule() {
@@ -137,7 +137,7 @@ function airbnbScript(adminUrl: string): string {
     }
     var sig = signature(d);
     if (sig === lastSig) return;
-    if (!Object.keys(d.prices).length && !d.nights.length && !d.shown.length && !/AED|[\\u0600-\\u06FF\\uFE70-\\uFEFF]|\\u20C3|USD|\\$|€|£/.test(d.text)) return;
+    if (!Object.keys(d.prices).length && !d.nights.length && !d.months.length && !/AED|[\\u0600-\\u06FF\\uFE70-\\uFEFF]|\\u20C3|USD|\\$|€|£/.test(d.text)) return;
     sending = true;
     lastSig = sig;
     // The page's JSON is as it was when the page loaded; after a change on Airbnb a fresh copy has the new settings.
@@ -163,7 +163,8 @@ function airbnbScript(adminUrl: string): string {
             lastSig = "";
             return note(RELOAD, true);
           }
-          var days = typeof res.nights === "number" ? " (" + res.nights + " calendar days read)" : "";
+          // The calendar's months as the portal read them ("Dec 2026: 31 days, 27 priced").
+          var days = res.calendar ? " (calendar: " + res.calendar + ")" : typeof res.nights === "number" ? " (" + res.nights + " calendar days read)" : "";
           if (res.status === "saved") note("Prices saved to " + res.unit + days + ": " + res.changes.join(", ") + ". The website follows within minutes.");
           else if (res.status === "unchanged") note("Prices match " + res.unit + " in the portal" + days + ".");
           else {
