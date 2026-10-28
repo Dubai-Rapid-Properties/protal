@@ -116,8 +116,8 @@ test("reads calendar days and merges them into seasons", () => {
     "December 31, 2026, AED 1,500",
     "October 1, 2026, AED 700",
   ];
-  // On the calendar, the days read from the month grid on screen.
-  const p = parseAirbnbPrices({ u: "https://www.airbnb.com/multicalendar/12345", shown: labels }, TODAY);
+  // Days labelled with their date, on one listing's own page.
+  const p = parseAirbnbPrices({ u: "https://www.airbnb.com/hosting/listings/editor/12345/details/pricing", nights: labels }, TODAY);
   assert.equal(p.currency, "AED");
   assert.equal(p.nights.length, 8);
   const rows = seasonsFromNights(p.nights, 450, TODAY);
@@ -129,6 +129,9 @@ test("reads calendar days and merges them into seasons", () => {
   // What the form saves reads back the same.
   assert.deepEqual(parseSeasons(seasonsToText(rows)), { seasons: rows });
 
-  const mixed = parseAirbnbPrices({ u: "https://www.airbnb.com/multicalendar/1", shown: ["Dec 1, 2026, $100", "Dec 2, 2026, AED 400"] }, TODAY);
+  const mixed = parseAirbnbPrices(
+    { u: "https://www.airbnb.com/hosting/listings/editor/1/details/pricing", nights: ["Dec 1, 2026, $100", "Dec 2, 2026, AED 400"] },
+    TODAY
+  );
   assert.equal(mixed.currency, "mixed");
 });

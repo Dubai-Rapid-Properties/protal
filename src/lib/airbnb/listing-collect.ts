@@ -35,11 +35,12 @@ export interface AirbnbListingSent {
   /** Calendar days' labels carrying a date and a price ("Thu, October 15, 2026, AED 450"). */
   nights: string[];
   /**
-   * Days read from the month calendar as laid out on screen ("2026-12-28 900د.إ"):
-   * only the listing being looked at. `nights` may also hold other listings' days,
-   * which the multi-listing calendar keeps in the page too.
+   * The host calendar's month grids, as `{ name: "December 2026", days: [["Monday 28 Dec",
+   * "28", "Nightly price", "ﺩ.ﺇ900"], ...] }`: only the listing being looked at, where
+   * `nights` may also hold other listings' days (the multi-listing calendar keeps them in
+   * the page too). Read on the portal (calendar-days.ts).
    */
-  shown: string[];
+  months: { name: string; days: string[][] }[];
 }
 
 /**
@@ -180,145 +181,31 @@ export function collectAirbnbListing(doc: Document, href: string, withText: bool
       nights.push(label);
     }
   };
-  // The month calendar as it is laid out on screen (Calendar → Month): under a
-  // month's heading, each day's number with its price below it, in the column
-  // of its weekday. Read from where the text sits rather than from Airbnb's
-  // markup. A month any of whose days is not in its weekday's column (a heading
-  // that belongs to another month, a wrong year) is left out, never guessed.
-  const laidOut = function () {
-    const found: string[] = [];
-    const page = doc.body;
-    if (!page || typeof doc.createTreeWalker !== "function" || typeof doc.createRange !== "function") return found;
-    const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
-    const WEEKDAY = /^(sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)\.?$|^(sunday|monday|tuesday|wednesday|thursday|friday|saturday)$/i;
-    const boxes: { text: string; left: number; right: number; top: number; bottom: number }[] = [];
-    const walker = doc.createTreeWalker(page, 4); // text nodes
-    const range = doc.createRange();
-    for (let node = walker.nextNode(); node && boxes.length < 30000; node = walker.nextNode()) {
-      const text = (node.nodeValue || "").replace(/[‎‏؜‪-‮⁦-⁩]/g, "").replace(/\s+/g, " ").trim();
-      if (!text || text.length > 40) continue;
-      range.selectNodeContents(node);
-      const r = range.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) boxes.push({ text: text, left: r.left, right: r.right, top: r.top, bottom: r.bottom });
-    }
-
-    // Weekday columns, from the header row (Mon … Sun).
-    const columns: number[] = [];
-    for (let i = 0; i < boxes.length; i++) {
-      const w = boxes[i].text.match(WEEKDAY);
-      if (!w) continue;
-      const day = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"].indexOf(boxes[i].text.slice(0, 3).toLowerCase());
-      if (columns[day] === undefined) columns[day] = (boxes[i].left + boxes[i].right) / 2;
-    }
-    for (let c = 0; c < 7; c++) if (columns[c] === undefined) return found;
-    const xs = columns.slice().sort(function (a, b) { return a - b; });
-    const colWidth = (xs[6] - xs[0]) / 6;
-    if (!(colWidth > 20)) return found;
-    const columnOf = function (x: number) {
-      let best = 0;
-      for (let c = 1; c < 7; c++) if (Math.abs(columns[c] - x) < Math.abs(columns[best] - x)) best = c;
-      return Math.abs(columns[best] - x) < colWidth / 2 ? best : -1;
-    };
-
-    // Prices: "350د.إ" in one piece, or the amount and its currency side by side.
-    const prices: { text: string; left: number; top: number }[] = [];
-    for (let i = 0; i < boxes.length; i++) {
-      const b = boxes[i];
-      if (/%/.test(b.text) || !/^[^\da-z]*\d[\d,]*(\.\d{1,2})?[^\da-z]*$|^(AED|USD|EUR|GBP|SAR)\s*\d[\d,]*(\.\d{1,2})?$|^\d[\d,]*(\.\d{1,2})?\s*(AED|USD|EUR|GBP|SAR)$/i.test(b.text)) continue;
-      let text = b.text;
-      const next = boxes[i + 1];
-      if (!money.test(text) && next && money.test(next.text) && !/\d/.test(next.text) && Math.abs(next.top - b.top) < 10) text += next.text;
-      if (money.test(text)) prices.push({ text: text, left: b.left, top: b.top });
-    }
-
-    const heads: { month: number; year: number | null; top: number }[] = [];
-    for (let i = 0; i < boxes.length; i++) {
-      const m = boxes[i].text.match(/^([a-z]+)(?:\s+(\d{4}))?$/i);
-      const month = m ? MONTHS.indexOf(m[1].toLowerCase()) : -1;
-      if (m && month >= 0) heads.push({ month: month, year: m[2] ? Number(m[2]) : null, top: boxes[i].top });
-    }
-
-    // Day numbers sit at the same place in every day's box (its top left), so a
-    // stray number elsewhere (a guest's "+ 1") is not taken for a day.
-    const numbers: { text: string; left: number; right: number; top: number; bottom: number }[] = [];
-    const offsets: number[] = [];
-    for (let i = 0; i < boxes.length; i++) {
-      const b = boxes[i];
-      if (!/^\d{1,2}$/.test(b.text) || Number(b.text) < 1 || Number(b.text) > 31) continue;
-      const c = columnOf((b.left + b.right) / 2);
-      if (c < 0) continue;
-      numbers.push(b);
-      offsets.push(b.left - columns[c]);
-    }
-    const typical = offsets.slice().sort(function (a, b) { return a - b; })[Math.floor(offsets.length / 2)];
-
-    // Each day under the nearest heading above it.
-    const byHead: Record<number, { day: number; column: number; top: number; price: string | null }[]> = {};
-    for (let i = 0; i < numbers.length; i++) {
-      const b = numbers[i];
-      if (Math.abs(offsets[i] - typical) > 8) continue;
-      let head = -1;
-      for (let h = 0; h < heads.length; h++) if (heads[h].top < b.top && (head < 0 || heads[h].top > heads[head].top)) head = h;
-      if (head < 0) continue;
-      let price: { text: string; left: number; top: number } | null = null;
-      for (let p = 0; p < prices.length; p++) {
-        const q = prices[p];
-        if (q.top > b.top + 2 && q.top - b.top < colWidth * 0.9 && Math.abs(q.left - b.left) < colWidth / 2 && (!price || q.top < price.top)) price = q;
+  // The host calendar's month grids (Calendar → Month): each one's name ("December
+  // 2026") and, for every day, its pieces of text ("Monday 28 Dec", "28", "Nightly
+  // price", "ﺩ.ﺇ900"). Read on the portal (calendar-days.ts), so the reading can be
+  // put right there. Only the listing being looked at has grids.
+  const months: { name: string; days: string[][] }[] = [];
+  const grids = doc.querySelectorAll('[role="grid"]');
+  for (let g = 0; g < grids.length && months.length < 24; g++) {
+    const cells = grids[g].querySelectorAll('[role="gridcell"], [data-calendar-day]');
+    const days: string[][] = [];
+    for (let c = 0; c < cells.length && days.length < 42; c++) {
+      const pieces: string[] = [];
+      if (typeof doc.createTreeWalker === "function") {
+        const walker = doc.createTreeWalker(cells[c], 4); // text nodes
+        for (let node = walker.nextNode(); node && pieces.length < 12; node = walker.nextNode()) {
+          const text = (node.nodeValue || "").replace(/\s+/g, " ").trim();
+          if (text) pieces.push(text.slice(0, 60));
+        }
+      } else {
+        const text = (cells[c].textContent || "").replace(/\s+/g, " ").trim();
+        if (text) pieces.push(text.slice(0, 200));
       }
-      (byHead[head] = byHead[head] || []).push({ day: Number(b.text), column: columnOf((b.left + b.right) / 2), top: b.top, price: price ? price.text : null });
+      if (pieces.length) days.push(pieces);
     }
-
-    const now = new Date();
-    for (const h in byHead) {
-      const head = heads[Number(h)];
-      const all = byHead[h];
-      // A number shown twice (a guest's "+ 1" over the days): the day is the one
-      // in line with the other days of its week; if neither is, the month is left out.
-      const inLine = function (e: { top: number }) {
-        let n = 0;
-        for (let k = 0; k < all.length; k++) if (all[k] !== e && Math.abs(all[k].top - e.top) <= 3) n++;
-        return n;
-      };
-      let clash = false;
-      const days = all.filter(function (e) {
-        const rivals = all.filter(function (o) { return o.day === e.day; });
-        if (rivals.length === 1) return true;
-        const best = Math.max.apply(null, rivals.map(inLine));
-        const winners = rivals.filter(function (o) { return inLine(o) === best; });
-        if (winners.length > 1) clash = true;
-        return winners[0] === e;
-      });
-      if (clash) continue;
-      // No year on the heading: the one that puts the month nearest today.
-      let year = head.year;
-      if (year == null) {
-        const y = now.getFullYear();
-        year = [y - 1, y, y + 1].sort(function (a, b) {
-          return Math.abs(Date.UTC(a, head.month, 15) - now.getTime()) - Math.abs(Date.UTC(b, head.month, 15) - now.getTime());
-        })[0];
-      }
-      // A whole month: its 1st is there and no day twice (part of the month
-      // before, still under the next month's heading, is not).
-      const seen: Record<number, boolean> = {};
-      let fits = days.some(function (d) { return d.day === 1; });
-      for (let d = 0; d < days.length && fits; d++) {
-        fits = !seen[days[d].day];
-        seen[days[d].day] = true;
-      }
-      for (let d = 0; d < days.length && fits; d++) {
-        const date = new Date(Date.UTC(year, head.month, days[d].day));
-        fits = date.getUTCMonth() === head.month && date.getUTCDay() === days[d].column;
-      }
-      if (!fits) continue;
-      for (let d = 0; d < days.length; d++) {
-        if (!days[d].price) continue;
-        const iso = year + "-" + String(head.month + 1).padStart(2, "0") + "-" + String(days[d].day).padStart(2, "0");
-        found.push(iso + " " + days[d].price);
-      }
-    }
-    return found;
-  };
-  const shown = laidOut();
+    if (days.length) months.push({ name: (grids[g].getAttribute("aria-label") || "").slice(0, 40), days: days });
+  }
 
   const dated = doc.querySelectorAll("[data-testid], [data-date], [data-day], [data-key]");
   for (let d = 0; d < dated.length && nights.length < 400; d++) {
@@ -357,7 +244,7 @@ export function collectAirbnbListing(doc: Document, href: string, withText: bool
     text: withText && body ? String(body.innerText || "").slice(0, forAddress === false ? 100000 : 15000) : "",
     prices: prices,
     nights: nights,
-    shown: shown,
+    months: months,
   };
 
   // The button hands this over in the address (#...): keep it well inside
@@ -367,6 +254,7 @@ export function collectAirbnbListing(doc: Document, href: string, withText: bool
   };
   if (forAddress === false) return out;
   while (size() > MAX_ENCODED && out.text.length > 0) out.text = out.text.slice(0, Math.floor(out.text.length / 2) - 1);
+  while (size() > MAX_ENCODED && out.months.length > 1) out.months = out.months.slice(0, out.months.length - 1);
   while (size() > MAX_ENCODED && out.desc && out.desc.length > 500) out.desc = out.desc.slice(0, Math.floor(out.desc.length / 2));
   while (size() > MAX_ENCODED && out.nights.length > 30) out.nights = out.nights.slice(0, out.nights.length - 30);
   while (size() > MAX_ENCODED && out.photos.length > 10) out.photos = out.photos.slice(0, out.photos.length - 10);
