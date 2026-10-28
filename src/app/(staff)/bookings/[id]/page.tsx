@@ -88,7 +88,9 @@ export default async function BookingPage({
         description={`${b.booking_number} · ${unitLabel}`}
         actions={
           <>
-            {canManage && <BookingActions bookingId={b.id} status={b.status} />}
+            {canManage && (
+              <BookingActions bookingId={b.id} status={b.status} websiteRequest={!!b.website_ref && b.status === "tentative"} />
+            )}
             {canManage &&
               can(profile.role, "bookings.revenue") &&
               ["inquiry", "tentative", "confirmed", "cancelled"].includes(b.status) && (

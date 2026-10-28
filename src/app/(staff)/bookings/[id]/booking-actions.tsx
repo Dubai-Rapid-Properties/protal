@@ -27,7 +27,13 @@ const LABEL: Record<Transition, string> = {
   no_show: "No-show",
 };
 
-function ActionButton({ transition }: { transition: Transition }) {
+/** A request made on the Holiday Homes website: the guest's card is held until it is accepted. */
+const REQUEST_LABEL: Partial<Record<Transition, string>> = {
+  confirm: "Accept request",
+  cancel: "Decline request",
+};
+
+function ActionButton({ transition, request }: { transition: Transition; request: boolean }) {
   const { pending } = useFormStatus();
   const quiet = transition === "cancel" || transition === "no_show";
   return (
@@ -37,7 +43,7 @@ function ActionButton({ transition }: { transition: Transition }) {
       variant={transition === "cancel" ? "destructive" : quiet ? "outline" : "default"}
       disabled={pending}
     >
-      {LABEL[transition]}
+      {(request && REQUEST_LABEL[transition]) || LABEL[transition]}
     </Button>
   );
 }
@@ -46,10 +52,12 @@ function TransitionForm({
   bookingId,
   transition,
   action,
+  request,
 }: {
   bookingId: string;
   transition: Transition;
   action: (formData: FormData) => void;
+  request: boolean;
 }) {
   const reasonRef = React.useRef<HTMLInputElement>(null);
 
@@ -57,8 +65,14 @@ function TransitionForm({
     <form
       action={action}
       onSubmit={(e) => {
-        if (transition === "cancel") {
-          const reason = prompt("Cancel this booking? The dates become free again.\n\nReason (optional):");
+        if (transition === "confirm" && request) {
+          if (!confirm("Accept this request? The guest's card is charged and the stay confirmed.")) e.preventDefault();
+        } else if (transition === "cancel") {
+          const reason = prompt(
+            request
+              ? "Decline this request? The hold on the guest's card is released (nothing is charged) and the dates become free again.\n\nReason (optional):"
+              : "Cancel this booking? The dates become free again.\n\nReason (optional):"
+          );
           if (reason === null) return e.preventDefault();
           if (reasonRef.current) reasonRef.current.value = reason;
         } else if (transition === "no_show" && !confirm("Mark this guest as a no-show?")) {
@@ -69,7 +83,7 @@ function TransitionForm({
       <input type="hidden" name="bookingId" value={bookingId} />
       <input type="hidden" name="transition" value={transition} />
       <input type="hidden" name="reason" ref={reasonRef} />
-      <ActionButton transition={transition} />
+      <ActionButton transition={transition} request={request} />
     </form>
   );
 }
@@ -77,9 +91,12 @@ function TransitionForm({
 export function BookingActions({
   bookingId,
   status,
+  websiteRequest = false,
 }: {
   bookingId: string;
   status: Enums<"booking_status">;
+  /** A tentative booking from the Holiday Homes website: a request the team accepts or declines. */
+  websiteRequest?: boolean;
 }) {
   // One action state for the group: the button that was pressed disappears
   // once the status moves on, so its own state could never show the result.
@@ -95,7 +112,7 @@ export function BookingActions({
   return (
     <div className="flex flex-wrap gap-2">
       {offered.map((t) => (
-        <TransitionForm key={t} bookingId={bookingId} transition={t} action={action} />
+        <TransitionForm key={t} bookingId={bookingId} transition={t} action={action} request={websiteRequest} />
       ))}
     </div>
   );
