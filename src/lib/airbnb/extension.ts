@@ -114,7 +114,7 @@ function airbnbScript(adminUrl: string): string {
   }
 
   function schedule() {
-    if (autoOff || timer || !isListingHostPage()) return;
+    if (autoOff || timer || walking() || !isListingHostPage()) return;
     // Airbnb fills the page in pieces: read it once it has had a moment, at most every few seconds.
     timer = setTimeout(function () {
       timer = null;
@@ -122,8 +122,22 @@ function airbnbScript(adminUrl: string): string {
     }, Math.max(4000, lastRun + 10000 - Date.now()));
   }
 
+  // The listing the page was loaded for. Switching listings in the calendar swaps the URL before
+  // the new listing's days arrive, so a listing reached that way is synced after a reload only.
+  var loadedListing = listingInPath();
+  function listingInPath() {
+    var m = location.pathname.match(/\\/(\\d{3,25})(\\/|$)/);
+    return m ? m[1] : null;
+  }
+  var switchedNoted = "";
+
   function syncPrices() {
-    if (autoOff || sending || !isListingHostPage()) return;
+    if (autoOff || sending || walking() || !isListingHostPage()) return;
+    if (listingInPath() !== loadedListing) {
+      if (switchedNoted !== listingInPath()) note("press ⌘R (Ctrl+R) to sync this listing's prices: listings opened from the calendar's list are synced after a reload.");
+      switchedNoted = listingInPath() || "";
+      return;
+    }
     lastRun = Date.now();
     var d;
     try {
@@ -176,6 +190,117 @@ function airbnbScript(adminUrl: string): string {
       });
   }
 
+  // "Sync all listings": opens each listing's calendar in turn (a fresh page each time), waits for
+  // its months to load up to three months ahead, sends its prices, and at the end lists the results.
+  // The queue lives in this tab's sessionStorage so it carries across the page loads.
+  var ALL_KEY = "drp-sync-all";
+  var MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+  function walkState() {
+    try { return JSON.parse(sessionStorage.getItem(ALL_KEY) || "null"); } catch (e) { return null; }
+  }
+  function saveWalk(state) {
+    try {
+      if (state) sessionStorage.setItem(ALL_KEY, JSON.stringify(state));
+      else sessionStorage.removeItem(ALL_KEY);
+    } catch (e) {}
+  }
+  function walking() { return !!walkState(); }
+
+  // The host's listings, as the calendar's list of listings has them in the page.
+  function pageListings() {
+    var out = [];
+    var seen = {};
+    function walk(o, depth) {
+      if (!o || typeof o !== "object" || depth > 40 || out.length >= 200) return;
+      if (Array.isArray(o)) {
+        for (var i = 0; i < o.length; i++) walk(o[i], depth + 1);
+        return;
+      }
+      if (o.__typename === "HostCalendarThumbnailListingAttributes" && o.listingId && !seen[o.listingId]) {
+        seen[o.listingId] = true;
+        out.push({ id: String(o.listingId), title: String(o.title || o.listingId).slice(0, 80) });
+      }
+      for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) walk(o[k], depth + 1);
+    }
+    var scripts = document.querySelectorAll('script[type="application/json"]');
+    for (var s = 0; s < scripts.length; s++) {
+      try { walk(JSON.parse(scripts[s].textContent || ""), 0); } catch (e) {}
+    }
+    return out;
+  }
+
+  function startWalk() {
+    var listings = pageListings();
+    if (!listings.length) return note("open Calendar (Month view) on Airbnb first: the list of listings comes from there.", true);
+    saveWalk({ listings: listings, i: 0, results: [] });
+    openNext();
+  }
+  function stopWalk(why) {
+    saveWalk(null);
+    note(why || "stopped syncing all listings.", true, true);
+  }
+  function openNext() {
+    var state = walkState();
+    location.assign(location.origin + "/multicalendar/" + state.listings[state.i].id);
+  }
+
+  // Waits until the month three months ahead has loaded with its prices, scrolling to make it load.
+  function waitForMonths(done) {
+    var t = new Date();
+    var ahead = new Date(t.getFullYear(), t.getMonth() + 3, 1);
+    var want = MONTH_NAMES[ahead.getMonth()] + " " + ahead.getFullYear();
+    var money = /AED|USD|EUR|GBP|SAR|[؀-ۿﹰ-﻿]|⃃|\\$|€|£/;
+    var tries = 0;
+    (function check() {
+      var grids = document.querySelectorAll('[role="grid"]');
+      for (var g = 0; g < grids.length; g++) {
+        if ((grids[g].getAttribute("aria-label") || "").toLowerCase() === want && money.test(grids[g].textContent || "")) {
+          return setTimeout(function () { done(true); }, 1500);
+        }
+      }
+      if (++tries > 30) return done(false);
+      if (grids.length) grids[grids.length - 1].scrollIntoView({ block: "end" });
+      else window.scrollBy(0, 600);
+      setTimeout(check, 1000);
+    })();
+  }
+
+  function walkStep() {
+    var state = walkState();
+    if (!state) return;
+    var here = state.listings[state.i];
+    if (!here || listingInPath() !== here.id) return stopWalk("stopped syncing all listings: another page was opened.");
+    note("syncing all listings: " + (state.i + 1) + " of " + state.listings.length + ", " + here.title + "…", false, true);
+    waitForMonths(function (loaded) {
+      var d;
+      try { d = collectAirbnbListing(document, location.href, true, false); } catch (e) { d = null; }
+      var record = function (line) {
+        var now = walkState();
+        if (!now) return;
+        now.results.push(here.title + ": " + line);
+        now.i++;
+        saveWalk(now);
+        if (now.i < now.listings.length) return openNext();
+        saveWalk(null);
+        note("all " + now.listings.length + " listings synced:\\n• " + now.results.join("\\n• "), false, true);
+      };
+      if (!d) return record("the page could not be read");
+      try {
+        chrome.runtime.sendMessage({ sync: d }, function (res) {
+          if (chrome.runtime.lastError || !res) return stopWalk(RELOAD);
+          var months = String(res.calendar || "").match(/[A-Z][a-z]{2} \\d{4}(?=: \\d)/g);
+          var read = months ? " (" + months.join(", ") + ")" : loaded ? "" : " (the calendar did not load)";
+          if (res.status === "saved") record("updated" + read);
+          else if (res.status === "unchanged") record("already up to date" + read);
+          else if (res.status === "signin") stopWalk(res.message);
+          else record(res.message || "not saved");
+        });
+      } catch (e) {
+        stopWalk(isStale(e) ? RELOAD : "stopped: " + String(e && e.message));
+      }
+    });
+  }
+
   function sendReservation() {
     try {
       open("/bookings/from-airbnb", { u: location.href, t: String(document.body.innerText || "").slice(0, 60000) });
@@ -208,12 +333,14 @@ function airbnbScript(adminUrl: string): string {
     ".menu .hide{color:#666;font-size:12px;font-weight:400}" +
     ".note{position:absolute;right:0;bottom:48px;width:300px;background:#111;color:#fff;border-radius:12px;padding:10px 12px;font-size:13px;font-weight:400;line-height:1.35;box-shadow:0 8px 28px rgba(0,0,0,.22);cursor:pointer}" +
     ".note.bad{background:#b42318}" +
+    ".note.long{width:380px;max-height:60vh;overflow:auto;white-space:pre-line}" +
     ".note[hidden]{display:none}" +
     "</style>" +
     "<div class='note' hidden></div>" +
     "<div class='menu' hidden>" +
     "<button data-do='listing'>Import listing<small>Details and photos, or prices from Pricing / Calendar</small></button>" +
     "<button data-do='reservation'>Send reservation<small>Guest, dates and payout</small></button>" +
+    "<button data-do='all'>Sync all listings<small>Every listing's prices, one after the other</small></button>" +
     "<button data-do='auto' class='hide'></button>" +
     "<button data-do='hide' class='hide'>Hide this button on this page</button>" +
     "</div>" +
@@ -222,13 +349,14 @@ function airbnbScript(adminUrl: string): string {
   var menu = root.querySelector(".menu");
   var noteBox = root.querySelector(".note");
   var noteTimer = null;
-  function note(text, bad) {
+  // \`stay\`: kept until clicked (progress and results of "Sync all listings").
+  function note(text, bad, stay) {
     menu.hidden = true;
     noteBox.textContent = "D|R|P: " + text;
-    noteBox.className = bad ? "note bad" : "note";
+    noteBox.className = (bad ? "note bad" : "note") + (text.indexOf("\\n") >= 0 ? " long" : "");
     noteBox.hidden = false;
     clearTimeout(noteTimer);
-    noteTimer = setTimeout(function () { noteBox.hidden = true; }, bad ? 15000 : 8000);
+    if (!stay) noteTimer = setTimeout(function () { noteBox.hidden = true; }, bad ? 15000 : 8000);
   }
   noteBox.addEventListener("click", function () { noteBox.hidden = true; });
   var autoItem = root.querySelector("button[data-do='auto']");
@@ -236,9 +364,11 @@ function airbnbScript(adminUrl: string): string {
     autoItem.textContent = autoOff ? "Turn on automatic price sync" : "Turn off automatic price sync";
   }
   showAuto();
+  var allItem = root.querySelector("button[data-do='all']");
   function toggle(show) {
     menu.hidden = show === undefined ? !menu.hidden : !show;
     if (!menu.hidden) noteBox.hidden = true;
+    allItem.firstChild.textContent = walking() ? "Stop syncing all listings" : "Sync all listings";
     var items = menu.querySelectorAll("button[data-do='listing'], button[data-do='reservation']");
     var suggested = isReservation() ? "reservation" : "listing";
     for (var i = 0; i < items.length; i++) items[i].classList.toggle("hint", items[i].getAttribute("data-do") === suggested);
@@ -252,6 +382,10 @@ function airbnbScript(adminUrl: string): string {
     if (what === "listing") importListing();
     else if (what === "reservation") sendReservation();
     else if (what === "hide") host.remove();
+    else if (what === "all") {
+      if (walking()) stopWalk();
+      else startWalk();
+    }
     else if (what === "auto") {
       autoOff = !autoOff;
       try { localStorage.setItem(AUTO_KEY, autoOff ? "off" : "on"); } catch (e) {}
@@ -275,7 +409,8 @@ function airbnbScript(adminUrl: string): string {
 
   // Airbnb changes pages without loading them, and fills prices in as they arrive.
   new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
-  schedule();
+  if (walking()) walkStep();
+  else schedule();
 })();
 `;
 }
@@ -358,6 +493,11 @@ Prices sync on their own: open a listing's Pricing page or Calendar on Airbnb
 (and change prices there as usual). The extension saves the prices shown onto
 the unit whose Airbnb calendar is that listing, and a note at the bottom right
 says what changed. Amounts must be in AED. The button's menu turns this off.
+A listing picked from the calendar's list of listings is synced after a reload.
+
+Sync all listings (in the button's menu, on the Calendar in Month view): opens
+every listing's calendar in turn, sends its prices for the next three months,
+and lists the results at the end. Leave the tab alone until it is done.
 
 Update: download the extension again from the portal's Import from Airbnb page,
 replace this folder's files, and click the reload arrow on chrome://extensions.
