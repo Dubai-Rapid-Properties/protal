@@ -174,14 +174,19 @@ export function parseAirbnbPrices(sent: unknown, today: string): AirbnbPrices {
   const text = typeof s.text === "string" ? s.text.slice(0, 100_000) : "";
   if (!isHostPage(url) && !/\b(nightly|base|weekend) price\b/i.test(text)) return { ...NO_PRICES, nights: [] };
 
-  const j = (s.prices && typeof s.prices === "object" ? s.prices : {}) as Record<string, unknown>;
+  // The calendar (Calendar, multicalendar) keeps every listing's settings and days in the page, so
+  // there only what it shows for the listing being looked at counts: the side panel's text and the
+  // month grid on screen.
+  const calendar = /\/(multicalendar|hosting\/calendar)\b/i.test(url ?? "");
+  const j = (!calendar && s.prices && typeof s.prices === "object" ? s.prices : {}) as Record<string, unknown>;
   const t = fromText(text);
   const pick = (a: number | null, b: number | undefined) => a ?? b ?? null;
 
   const currencies = new Set<string>();
   const nights = new Map<string, number>();
-  if (Array.isArray(s.nights)) {
-    for (const raw of s.nights.slice(0, 500)) {
+  const labels = [...(Array.isArray(s.shown) ? s.shown : []), ...(!calendar && Array.isArray(s.nights) ? s.nights : [])];
+  {
+    for (const raw of labels.slice(0, 500)) {
       if (typeof raw !== "string") continue;
       const n = nightFromLabel(raw.slice(0, 300), today);
       if (n && !nights.has(n.date)) {

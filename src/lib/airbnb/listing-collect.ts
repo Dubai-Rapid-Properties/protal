@@ -34,6 +34,12 @@ export interface AirbnbListingSent {
   prices: Record<string, number | string>;
   /** Calendar days' labels carrying a date and a price ("Thu, October 15, 2026, AED 450"). */
   nights: string[];
+  /**
+   * Days read from the month calendar as laid out on screen ("2026-12-28 900د.إ"):
+   * only the listing being looked at. `nights` may also hold other listings' days,
+   * which the multi-listing calendar keeps in the page too.
+   */
+  shown: string[];
 }
 
 /**
@@ -312,8 +318,7 @@ export function collectAirbnbListing(doc: Document, href: string, withText: bool
     }
     return found;
   };
-  const shownNights = laidOut();
-  for (let n = 0; n < shownNights.length; n++) addNight(shownNights[n]);
+  const shown = laidOut();
 
   const dated = doc.querySelectorAll("[data-testid], [data-date], [data-day], [data-key]");
   for (let d = 0; d < dated.length && nights.length < 400; d++) {
@@ -352,6 +357,7 @@ export function collectAirbnbListing(doc: Document, href: string, withText: bool
     text: withText && body ? String(body.innerText || "").slice(0, forAddress === false ? 100000 : 15000) : "",
     prices: prices,
     nights: nights,
+    shown: shown,
   };
 
   // The button hands this over in the address (#...): keep it well inside

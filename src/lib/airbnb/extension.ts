@@ -110,7 +110,7 @@ function airbnbScript(adminUrl: string): string {
   // the calendar's night labels and the lines of text that carry an amount.
   function signature(d) {
     var lines = String(d.text || "").split("\\n").filter(function (l) { return /\\d/.test(l) && /AED|[\\u0600-\\u06FF\\uFE70-\\uFEFF]|\\u20C3|USD|\\$|€|£|%/.test(l); });
-    return JSON.stringify([location.pathname, d.prices, d.nights, lines]);
+    return JSON.stringify([location.pathname, d.prices, d.nights, d.shown, lines]);
   }
 
   function schedule() {
@@ -137,7 +137,7 @@ function airbnbScript(adminUrl: string): string {
     }
     var sig = signature(d);
     if (sig === lastSig) return;
-    if (!Object.keys(d.prices).length && !d.nights.length && !/AED|[\\u0600-\\u06FF\\uFE70-\\uFEFF]|\\u20C3|USD|\\$|€|£/.test(d.text)) return;
+    if (!Object.keys(d.prices).length && !d.nights.length && !d.shown.length && !/AED|[\\u0600-\\u06FF\\uFE70-\\uFEFF]|\\u20C3|USD|\\$|€|£/.test(d.text)) return;
     sending = true;
     lastSig = sig;
     // The page's JSON is as it was when the page loaded; after a change on Airbnb a fresh copy has the new settings.
