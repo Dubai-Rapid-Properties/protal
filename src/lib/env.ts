@@ -80,6 +80,9 @@ export const env = {
   websiteDeployGithubToken: optional("WEBSITE_DEPLOY_GITHUB_TOKEN"),
   // Where the website is served, for "View on the website" links.
   websiteUrl: (optional("WEBSITE_URL") ?? "https://dubairapidproperties.com").replace(/\/$/, ""),
+  // The Holiday Homes website, which the portal tells when staff accept or decline a booking made
+  // there (it takes or releases the guest's card hold). Called with WEBSITE_API_KEY.
+  holidayHomesUrl: (optional("HOLIDAY_HOMES_URL") ?? "https://stay.dubairapidproperties.com").replace(/\/$/, ""),
 
   storage: {
     driver: (optional("STORAGE_DRIVER") ?? "supabase") as "supabase" | "s3",

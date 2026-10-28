@@ -9,6 +9,7 @@ import { can } from "@/lib/auth/rbac";
 import { dubaiToday, nightsBetween } from "@/lib/calendar";
 import { quoteStay } from "@/lib/pricing";
 import { flushEmailsSoon } from "@/lib/notify/flush";
+import { tellWebsite } from "@/lib/website-bookings";
 import { earningsToBookingAmounts, parseAirbnbEarnings } from "@/lib/airbnb/earnings-csv";
 import { explain } from "./explain";
 
@@ -353,7 +354,7 @@ export async function changeBookingStatus(
   const supabase = await createClient();
   const { data: booking } = await supabase
     .from("bookings")
-    .select("id, status, unit_id, check_in, check_out")
+    .select("id, status, unit_id, check_in, check_out, website_ref")
     .eq("id", bookingId)
     .maybeSingle();
   if (!booking) return { error: "Booking not found." };
@@ -366,6 +367,15 @@ export async function changeBookingStatus(
     if (holds.length > 0) {
       return { error: `The unit is blocked from ${holds[0].start_date} to ${holds[0].end_date}.` };
     }
+  }
+
+  // A booking made on the Holiday Homes website: the website takes the guest's card hold when it is
+  // accepted, and releases it (or marks a paid stay for a refund) when it is declined or cancelled.
+  let website: "accepted" | "declined" | null = null;
+  if (booking.website_ref && (transition === "confirm" || transition === "cancel")) {
+    const told = await tellWebsite(booking.website_ref, transition === "confirm" ? "confirmed" : "cancelled", reason || undefined);
+    if ("error" in told) return { error: told.error };
+    if ("ok" in told) website = transition === "confirm" ? "accepted" : "declined";
   }
 
   const { data: changed, error } = await supabase
@@ -385,6 +395,9 @@ export async function changeBookingStatus(
   revalidatePath("/bookings");
   revalidatePath(`/bookings/${bookingId}`);
   revalidatePath(`/units/${booking.unit_id}`);
+  if (website === "accepted") return { success: "Request accepted: the guest's card was charged and the stay confirmed." };
+  if (website === "declined" && booking.status === "tentative")
+    return { success: "Request declined: the hold on the guest's card was released and the dates are free again." };
   const done = {
     confirm: "Booking confirmed.",
     check_in: "Guest checked in.",
