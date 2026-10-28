@@ -6,6 +6,7 @@ import { amountIn } from "@/lib/airbnb/reservation-page";
 
 const TODAY = "2026-10-27";
 const CALENDAR = "https://www.airbnb.co.uk/multicalendar/1703596941988303704";
+const EDITOR = "https://www.airbnb.co.uk/hosting/listings/editor/1703596941988303704/details/pricing";
 
 // The calendar's side panel as the browser shows it, dirhams after the amount
 // and wrapped in right-to-left marks.
@@ -75,6 +76,24 @@ function fakeDoc(days: { attrs: Record<string, string>; text: string; shown: str
   } as unknown as Document;
 }
 
+test("the calendar counts only its side panel and month grid, not other listings in the page", () => {
+  const p = parseAirbnbPrices(
+    {
+      u: CALENDAR,
+      text: PANEL,
+      // Another listing's settings and days, kept in the multi-listing calendar's page.
+      prices: { nightly: 185, currency: "AED" },
+      nights: ["Wednesday, October 28, 2026, د.إ343", "Thursday, October 29, 2026, د.إ185"],
+      shown: ["2026-12-28 900د.إ"],
+    },
+    TODAY
+  );
+  assert.equal(p.nightly, 229);
+  assert.deepEqual(p.nights, [{ date: "2026-12-28", price: 900 }]);
+  // The Pricing page is one listing's: its page settings still count.
+  assert.equal(parseAirbnbPrices({ u: EDITOR, text: PANEL, prices: { nightly: 185, currency: "AED" } }, TODAY).nightly, 185);
+});
+
 test("collects calendar days without running the day and price together", () => {
   const sent = collectAirbnbListing(
     fakeDoc(
@@ -84,7 +103,7 @@ test("collects calendar days without running the day and price together", () => 
       ],
       PANEL
     ),
-    CALENDAR,
+    EDITOR,
     true
   );
   assert.deepEqual(sent.nights, ["2026-11-12 12 415د.إ", "Saturday, 1 November 2026 1 386د.إ"]);
