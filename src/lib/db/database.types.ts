@@ -2465,6 +2465,11 @@ export type Database = {
           created_at: string;
           updated_at: string;
           kind: string;
+          owner_contact: string | null;
+          owner_contacted_at: string | null;
+          owner_contacted_by: string | null;
+          owner_reminded_at: string | null;
+          owner_reminders_sent: number;
         };
         Insert: {
           id?: string;
@@ -2504,6 +2509,11 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
           kind?: string;
+          owner_contact?: string | null;
+          owner_contacted_at?: string | null;
+          owner_contacted_by?: string | null;
+          owner_reminded_at?: string | null;
+          owner_reminders_sent?: number;
         };
         Update: {
           id?: string;
@@ -2543,6 +2553,11 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
           kind?: string;
+          owner_contact?: string | null;
+          owner_contacted_at?: string | null;
+          owner_contacted_by?: string | null;
+          owner_reminded_at?: string | null;
+          owner_reminders_sent?: number;
         };
         Relationships: [
           {
@@ -5645,6 +5660,20 @@ export type Database = {
       raise_owner_ticket: {
         Args: Record<string, unknown>;
         Returns: unknown;
+      };
+      claim_owner_contact_reminders: {
+        Args: { p_every?: string };
+        Returns: {
+          id: string;
+          ticket_number: string;
+          title: string;
+          kind: string;
+          priority: Database["public"]["Enums"]["maintenance_priority"];
+          unit_id: string;
+          reported_at: string;
+          reminders_sent: number;
+          previous_reminded_at: string | null;
+        }[];
       };
       save_push_subscription: {
         Args: Record<string, unknown>;

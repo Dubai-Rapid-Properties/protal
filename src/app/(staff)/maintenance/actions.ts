@@ -211,3 +211,39 @@ export async function deleteTicket(ticketId: string): Promise<ActionState> {
   revalidatePath("/dashboard");
   redirect("/maintenance");
 }
+
+/**
+ * Whether the owner has been contacted about the ticket (0065). Until they
+ * have, operations is reminded every two hours; "Not yet" starts the
+ * reminders again.
+ */
+export async function setOwnerContact(ticketId: string, contacted: boolean): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "maintenance.assign")) return { error: "You do not have permission to update tickets." };
+  if (!z.string().uuid().safeParse(ticketId).success) return { error: "Unknown ticket." };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("maintenance_requests")
+    .update(
+      contacted
+        ? { owner_contact: "contacted", owner_contacted_at: new Date().toISOString(), owner_contacted_by: profile.id }
+        : { owner_contact: "pending", owner_contacted_at: null, owner_contacted_by: null }
+    )
+    .eq("id", ticketId)
+    .select("id");
+  if (error) return { error: explain(error) };
+  if (!data?.length) return { error: NOT_CHANGED };
+
+  // On the timeline, for staff only.
+  await supabase.from("maintenance_updates").insert({
+    request_id: ticketId,
+    author_id: profile.id,
+    note: contacted ? "Owner contacted." : "Owner not contacted yet: reminders to operations are on again.",
+    is_internal: true,
+  });
+
+  revalidatePath("/maintenance");
+  revalidatePath(`/maintenance/${ticketId}`);
+  return { success: contacted ? "Marked as contacted. The reminders have stopped." : "Marked as not contacted yet. Reminders are on." };
+}

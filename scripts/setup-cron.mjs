@@ -7,7 +7,9 @@
  *   /api/cron/website-rebuild  every hour - website rebuild, so it shows
  *                              Property Finder's current listings
  *   /api/cron/stay-alarms      every 2 minutes - check-out / check-in alarm
- *                              on phones, repeated until someone presses Done
+ *                              on phones, repeated until someone presses Done;
+ *                              and the two-hourly "contact the owner" email
+ *                              about new repairs and complaints (0065)
  *
  *   npm run db:cron -- --url https://admin.dubairapidproperties.com
  *   npm run db:cron -- --status      # last runs and responses

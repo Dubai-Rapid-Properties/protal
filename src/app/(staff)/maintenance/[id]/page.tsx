@@ -16,6 +16,9 @@ import { MAINTENANCE_CATEGORY, TICKET_KIND } from "@/lib/labels";
 import { toTicketNotes } from "@/lib/tickets/notes";
 import { DetailsCard, StatusCard } from "./ticket-panel";
 import { DeleteTicketButton } from "./delete-ticket";
+import { OwnerContactCard } from "./owner-contact";
+import { OWNER_CONTACT_EVERY_HOURS } from "@/lib/tickets/owner-contact";
+import { env } from "@/lib/env";
 
 export const metadata = { title: "Ticket" };
 
@@ -64,6 +67,30 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
       people.set(p.id, `${p.full_name || p.email}${p.role === "owner" ? " (owner)" : ""}`);
     }
   }
+
+  // The unit's owners, to call about the ticket (0065).
+  const { data: ownerships } = t.owner_contact
+    ? await supabase
+        .from("unit_ownerships")
+        .select("is_primary_contact, owners(full_name, phone, whatsapp, email)")
+        .eq("unit_id", t.unit_id)
+        .is("end_date", null)
+        .order("is_primary_contact", { ascending: false })
+    : { data: [] };
+  const ownersToCall = (ownerships ?? [])
+    .map((o) => o.owners)
+    .filter((o): o is NonNullable<typeof o> => !!o)
+    .map((o) => ({ name: o.full_name, phone: o.phone || o.whatsapp, email: o.email }));
+  const contactedBy = t.owner_contacted_by ? people.get(t.owner_contacted_by) ?? "staff" : "staff";
+  const contactedLine = t.owner_contacted_at
+    ? `By ${contactedBy} on ${new Date(t.owner_contacted_at).toLocaleString("en-GB", {
+        timeZone: "Asia/Dubai",
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      })}.`
+    : null;
 
   const unitLabel = `${t.units?.properties?.name ?? ""} · ${t.units?.unit_number ?? ""}`;
   const canManage = can(profile.role, "maintenance.assign");
@@ -172,22 +199,36 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
           />
         </div>
 
-        {canManage && (
+        {(canManage || t.owner_contact) && (
           <div className="space-y-5">
-            <StatusCard ticketId={t.id} status={t.status} />
-            <DetailsCard
-              ticketId={t.id}
-              staff={[...(staffResult.data ?? [])].map((p) => ({ id: p.id, name: p.full_name || p.email || "Staff" }))}
-              current={{
-                priority: t.priority,
-                assignedTo: t.assigned_to,
-                scheduledFor: t.scheduled_for ? t.scheduled_for.slice(0, 10) : null,
-                quoted: t.quoted_amount_aed,
-                final: t.final_amount_aed,
-                costBorneBy: t.cost_borne_by,
-                resolution: t.resolution_notes,
-              }}
-            />
+            {t.owner_contact && (
+              <OwnerContactCard
+                ticketId={t.id}
+                contacted={t.owner_contact === "contacted"}
+                contactedLine={contactedLine}
+                reminders={t.owner_reminders_sent}
+                owners={ownersToCall}
+                canMark={canManage}
+                everyHours={OWNER_CONTACT_EVERY_HOURS}
+                inbox={env.operationsEmail}
+              />
+            )}
+            {canManage && <StatusCard ticketId={t.id} status={t.status} />}
+            {canManage && (
+              <DetailsCard
+                ticketId={t.id}
+                staff={[...(staffResult.data ?? [])].map((p) => ({ id: p.id, name: p.full_name || p.email || "Staff" }))}
+                current={{
+                  priority: t.priority,
+                  assignedTo: t.assigned_to,
+                  scheduledFor: t.scheduled_for ? t.scheduled_for.slice(0, 10) : null,
+                  quoted: t.quoted_amount_aed,
+                  final: t.final_amount_aed,
+                  costBorneBy: t.cost_borne_by,
+                  resolution: t.resolution_notes,
+                }}
+              />
+            )}
           </div>
         )}
       </div>
