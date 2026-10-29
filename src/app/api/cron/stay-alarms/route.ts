@@ -3,12 +3,15 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { pushStayAlarms } from "@/lib/push/stay-alarms";
 import { pushNotifications } from "@/lib/push/notifications";
+import { remindOwnerContacts } from "@/lib/tickets/owner-contact";
 import { env } from "@/lib/env";
 
 /**
  * Check-out / check-in alarms for phones with the portal closed (0043).
  * Called every two minutes by Supabase pg_cron (scripts/setup-cron.mjs);
  * each ring nobody has answered is pushed again until someone presses Done.
+ * Also emails operations about tickets whose owner nobody has contacted yet,
+ * every two hours until the ticket is marked "Owner contacted" (0065).
  *
  * Authenticated by CRON_SECRET, and refuses to run without one.
  */
@@ -35,7 +38,8 @@ async function handle(request: NextRequest) {
     const result = await pushStayAlarms(admin);
     // Every two minutes, any notification not on the phones yet (0051).
     const notifications = await pushNotifications(admin).catch((e: Error) => ({ error: e.message }));
-    return NextResponse.json({ ok: result.failed === 0, ...result, notifications });
+    const ownerContact = await remindOwnerContacts(admin).catch((e: Error) => ({ error: e.message }));
+    return NextResponse.json({ ok: result.failed === 0, ...result, notifications, ownerContact });
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "unknown" },

@@ -56,6 +56,10 @@ export const env = {
   // (Supabase pg_cron) sends it as "Authorization: Bearer <secret>".
   cronSecret: optional("CRON_SECRET"),
 
+  // The operations inbox: reminded every two hours to contact the owner about a
+  // new repair or complaint until the ticket is marked "Owner contacted" (0065).
+  operationsEmail: optional("OPERATIONS_EMAIL") ?? "operations@dubairapidproperties.com",
+
   // The admin team's bookings sheet (a Google Sheets link or ID, shared as
   // "anyone with the link can view"). The calendar cron brings its direct
   // and old-Airbnb-account stays into the portal (src/lib/sheet/sync.ts).

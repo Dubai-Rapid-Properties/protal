@@ -50,7 +50,7 @@ export default async function MaintenancePage({
   let query = supabase
     .from("maintenance_requests")
     .select(
-      "id, ticket_number, kind, category, priority, status, title, raised_by_kind, reported_at, units(id, unit_number, properties(name)), assignee:profiles!maintenance_requests_assigned_to_fkey(full_name)"
+      "id, ticket_number, kind, category, priority, status, title, raised_by_kind, reported_at, owner_contact, units(id, unit_number, properties(name)), assignee:profiles!maintenance_requests_assigned_to_fkey(full_name)"
     )
     .order("reported_at", { ascending: false })
     .limit(500);
@@ -184,6 +184,12 @@ export default async function MaintenancePage({
                   </TableCell>
                   <TableCell>
                     <MaintenanceStatusBadge status={t.status} />
+                    {t.owner_contact === "pending" &&
+                      !["completed", "closed", "rejected", "cancelled"].includes(t.status) && (
+                        <Badge variant="danger" className="mt-1 block w-fit">
+                          Owner not contacted
+                        </Badge>
+                      )}
                   </TableCell>
                   <TableCell className="hidden whitespace-nowrap text-sm lg:table-cell">
                     {formatDate(t.reported_at)}
