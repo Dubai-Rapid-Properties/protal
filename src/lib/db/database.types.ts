@@ -5284,6 +5284,50 @@ export type Database = {
           },
         ];
       };
+      website_news: {
+        Row: {
+          id: string;
+          url: string;
+          title: string;
+          source: string;
+          summary: string | null;
+          image_url: string | null;
+          published_on: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          url: string;
+          title: string;
+          source: string;
+          summary?: string | null;
+          image_url?: string | null;
+          published_on?: string;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          url?: string;
+          title?: string;
+          source?: string;
+          summary?: string | null;
+          image_url?: string | null;
+          published_on?: string;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "website_news_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       website_team: {
         Row: {
           id: string;
