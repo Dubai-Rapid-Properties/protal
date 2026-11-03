@@ -21,8 +21,8 @@ const TICKET = {
   previous_reminded_at: null,
 };
 
-let sent: { to: string[]; subject: string; text: string }[];
-let resendFails: boolean;
+let sent: { p_ticket: string; p_title: string; p_body: string }[];
+let notifyFails: boolean;
 let updates: { id: unknown; patch: Record<string, unknown> }[];
 
 /** Just enough of supabase-js for remindOwnerContacts. */
@@ -34,7 +34,12 @@ function fakeClient(due: unknown[]) {
     ],
   };
   return {
-    rpc: async (name: string, args: unknown) => {
+    rpc: async (name: string, args: never) => {
+      if (name === "notify_owner_contact") {
+        if (notifyFails) return { data: null, error: { message: "db down" } };
+        sent.push(args);
+        return { data: 2, error: null };
+      }
       assert.equal(name, "claim_owner_contact_reminders");
       assert.deepEqual(args, { p_every: "2 hours" });
       return { data: due, error: null };
@@ -63,11 +68,9 @@ function fakeClient(due: unknown[]) {
 beforeEach(() => {
   sent = [];
   updates = [];
-  resendFails = false;
-  globalThis.fetch = (async (_url: string, init: { body: string }) => {
-    if (resendFails) return new Response(JSON.stringify({ message: "rate limited" }), { status: 429 });
-    sent.push(JSON.parse(init.body));
-    return new Response(JSON.stringify({ id: "re_1" }), { status: 200 });
+  notifyFails = false;
+  globalThis.fetch = (async () => {
+    throw new Error("no email is sent");
   }) as typeof fetch;
 });
 
@@ -84,18 +87,18 @@ test("the reminder names the ticket, the owner to call and how to stop it", () =
   assert.match(ownerContactReminder(TICKET, "X", []).body, /No owner is recorded for this unit/);
 });
 
-test("due tickets are emailed to the operations inbox", async () => {
+test("due tickets notify the ticket's staff, not an email", async () => {
   const result = await remindOwnerContacts(fakeClient([TICKET]));
   assert.deepEqual(result, { sent: 1, failed: 0 });
   assert.equal(sent.length, 1);
-  assert.deepEqual(sent[0].to, ["operations@dubairapidproperties.com"]);
-  assert.match(sent[0].subject, /DRP-MR-2026-0042 Marina Gate 1 2807/);
-  assert.match(sent[0].text, /Amal Perera/);
+  assert.equal(sent[0].p_ticket, "t1");
+  assert.match(sent[0].p_title, /DRP-MR-2026-0042 Marina Gate 1 2807/);
+  assert.match(sent[0].p_body, /Amal Perera, \+971 50 123 4567/);
   assert.deepEqual(updates, []);
 });
 
 test("a reminder that can't be sent is tried again on the next run", async () => {
-  resendFails = true;
+  notifyFails = true;
   const result = await remindOwnerContacts(fakeClient([{ ...TICKET, reminders_sent: 3, previous_reminded_at: "2026-10-29T08:00:00Z" }]));
   assert.deepEqual(result, { sent: 0, failed: 1 });
   assert.deepEqual(updates, [

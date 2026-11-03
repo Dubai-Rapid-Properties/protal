@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { BadgeCheck, Bell, CalendarPlus, CalendarRange, CalendarX2, ClipboardCheck, FileCheck2, FileText, HandCoins, Wrench } from "lucide-react";
+import { BadgeCheck, Bell, CalendarPlus, CalendarRange, CalendarX2, ClipboardCheck, FileCheck2, FileText, HandCoins, BellRing, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/domain/shared";
@@ -24,6 +24,7 @@ const ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   booking_cancelled: CalendarX2,
   ticket_new: Wrench,
   ticket_status: ClipboardCheck,
+  ticket_owner_contact: BellRing,
   refund_new: HandCoins,
   refund_settled: BadgeCheck,
   statement_review: FileText,

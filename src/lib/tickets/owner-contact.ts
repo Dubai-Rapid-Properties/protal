@@ -1,12 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/db/database.types";
 import { env } from "@/lib/env";
-import { sendMessage } from "@/lib/messaging";
 
 /**
  * Reminders to contact the owner about a new repair or complaint (0065).
- * Until staff mark a ticket "Owner contacted", the operations inbox is emailed
- * every two hours, like an alarm that keeps ringing. The portal's two-minute
+ * Until staff mark a ticket "Owner contacted", the ticket's staff get a
+ * notification (bell and phone) every two hours, like an alarm that keeps
+ * ringing (0066). The portal's two-minute
  * scheduler (/api/cron/stay-alarms) runs remindOwnerContacts.
  */
 
@@ -110,13 +110,18 @@ export async function remindOwnerContacts(admin: Client): Promise<{ sent: number
   let failed = 0;
   for (const ticket of due) {
     const { subject, body } = ownerContactReminder(ticket, unitLabel.get(ticket.unit_id) ?? "", owners.get(ticket.unit_id) ?? []);
-    const result = await sendMessage({ channel: "email", to: env.operationsEmail, subject, body });
-    if (result.ok) {
+    const owner = owners.get(ticket.unit_id)?.[0];
+    const { error: notifyError } = await admin.rpc("notify_owner_contact", {
+      p_ticket: ticket.id,
+      p_title: subject,
+      p_body: `${body.split("\n")[0]}${owner ? ` Owner: ${owner.name}${owner.phone ? `, ${owner.phone}` : ""}.` : ""}`,
+    });
+    if (!notifyError) {
       sent++;
       continue;
     }
     failed++;
-    console.error(`[owner-contact] ${ticket.ticket_number}: ${result.error}`);
+    console.error(`[owner-contact] ${ticket.ticket_number}: ${notifyError.message}`);
     // Not sent: put the clock back so the next run (two minutes on) tries again.
     await admin
       .from("maintenance_requests")
