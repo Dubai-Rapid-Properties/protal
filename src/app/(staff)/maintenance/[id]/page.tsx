@@ -18,7 +18,6 @@ import { DetailsCard, StatusCard } from "./ticket-panel";
 import { DeleteTicketButton } from "./delete-ticket";
 import { OwnerContactCard } from "./owner-contact";
 import { OWNER_CONTACT_EVERY_HOURS } from "@/lib/tickets/owner-contact";
-import { env } from "@/lib/env";
 
 export const metadata = { title: "Ticket" };
 
@@ -210,7 +209,7 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
                 owners={ownersToCall}
                 canMark={canManage}
                 everyHours={OWNER_CONTACT_EVERY_HOURS}
-                inbox={env.operationsEmail}
+                inbox="The ticket's staff"
               />
             )}
             {canManage && <StatusCard ticketId={t.id} status={t.status} />}

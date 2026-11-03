@@ -5568,6 +5568,10 @@ export type Database = {
       };
     };
     Functions: {
+      notify_owner_contact: {
+        Args: { p_ticket: string; p_title: string; p_body: string };
+        Returns: number;
+      };
       ack_stay_alarm: {
         Args: Record<string, unknown>;
         Returns: unknown;

@@ -11,7 +11,7 @@ export type OwnerToCall = { name: string; phone: string | null; email: string | 
 
 /**
  * Has someone spoken to the owner about this ticket? Until they have,
- * operations is emailed every two hours (0065); "Contacted" stops it.
+ * the ticket's staff get a notification every two hours (0066); "Contacted" stops it.
  */
 export function OwnerContactCard({
   ticketId,
@@ -60,7 +60,7 @@ export function OwnerContactCard({
           </p>
         ) : (
           <p>
-            <span className="font-medium">Not contacted yet.</span> {inbox} is reminded every {everyHours} hours
+            <span className="font-medium">Not contacted yet.</span> {inbox} get a notification every {everyHours} hours
             until this is marked contacted
             {reminders ? ` (${reminders} reminder${reminders === 1 ? "" : "s"} sent so far)` : ""}.
           </p>
