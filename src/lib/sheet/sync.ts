@@ -122,7 +122,10 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
 
     for (const row of parsed.rows) {
       if (row.checkOut < today) continue;
-      if (row.channel === null && !row.ownerStay) continue;
+      if (row.channel === null && !row.ownerStay) {
+        await applyAirbnbExtension(client, row, units, loadBookings, today, result);
+        continue;
+      }
 
       const unit = matchUnit(row, units);
       if (!unit) {
@@ -263,6 +266,93 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
     problems: result.problems.slice(0, 50),
   });
   return result;
+}
+
+/**
+ * A stay from the current Airbnb account is left to its calendar feed, but a
+ * guest who extends with D|R|P directly (the sheet's check-out later than
+ * Airbnb's) has the extra nights nowhere on Airbnb. Those nights become a
+ * direct booking of their own, from Airbnb's check-out to the sheet's, kept
+ * in step with the sheet.
+ */
+async function applyAirbnbExtension(
+  client: Client,
+  row: SheetRow,
+  units: PortalUnit[],
+  loadBookings: (unitId: string) => Promise<PortalBooking[]>,
+  today: string,
+  result: SheetSyncResult
+) {
+  if (row.status === "cancelled" || row.status === "completed") return;
+  const unit = matchUnit(row, units);
+  if (!unit) return;
+  const bookings = await loadBookings(unit.id);
+  const live = (b: PortalBooking) => !["cancelled", "no_show"].includes(b.status);
+  const airbnb = bookings
+    .filter((b) => b.icalUid && live(b) && b.checkIn === row.checkIn && b.checkOut < row.checkOut)
+    .sort((a, b) => b.checkOut.localeCompare(a.checkOut))[0];
+  const key = `${sheetName(row.guest)} (extension)`;
+  const existing = bookings.find((b) => b.sheetName === key && live(b) && b.checkOut > today);
+  if (!airbnb) return;
+  const start = airbnb.checkOut;
+  const nights = nightsBetween(start, row.checkOut);
+
+  if (existing) {
+    if (existing.checkIn === start && existing.checkOut === row.checkOut) return;
+    const { error } = await client.from("bookings").update({ check_in: start, check_out: row.checkOut }).eq("id", existing.id);
+    if (error) result.problems.push(`${label(row)}: extension not moved - ${await explainClash(client, error, unit.id, { ...row, checkIn: start })}`);
+    else {
+      Object.assign(existing, { checkIn: start, checkOut: row.checkOut });
+      result.updated++;
+    }
+    return;
+  }
+
+  const { data: guest, error: guestError } = await client
+    .from("guests")
+    .insert({ full_name: row.guest || "Guest" })
+    .select("id")
+    .single();
+  if (guestError) {
+    result.problems.push(`${label(row)}: ${guestError.message}`);
+    return;
+  }
+  const { data: created, error } = await client
+    .from("bookings")
+    .insert({
+      booking_number: "", // set by the autonumber trigger
+      unit_id: unit.id,
+      channel: "direct",
+      status: "confirmed",
+      check_in: start,
+      check_out: row.checkOut,
+      check_out_time: row.checkOutTime,
+      ...(row.nightlyRate ? priceColumns(sheetPrice(row.nightlyRate, nights)) : {}),
+      adults: 1,
+      guest_count_known: false,
+      guest_id: guest.id,
+      sheet_name: key,
+      internal_notes: [`${SHEET_NOTE}: extension of the Airbnb stay to ${row.checkOut}.`, row.comments].filter(Boolean).join(" "),
+    })
+    .select("id")
+    .single();
+  if (error) {
+    await client.from("guests").delete().eq("id", guest.id);
+    result.problems.push(
+      `${label(row)}: extension (${start} to ${row.checkOut}) not added - ${await explainClash(client, error, unit.id, { ...row, checkIn: start })}`
+    );
+    return;
+  }
+  bookings.push({
+    id: created.id,
+    status: "confirmed",
+    checkIn: start,
+    checkOut: row.checkOut,
+    guestName: row.guest,
+    sheetName: key,
+    icalUid: null,
+  });
+  result.created++;
 }
 
 /** A sheet price as the booking's columns. */
