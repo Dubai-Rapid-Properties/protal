@@ -9,6 +9,8 @@ import { mapAirbnbAmenities, parseAirbnbListing, type AirbnbListing } from "@/li
 import { downloadAirbnbPhoto } from "@/lib/airbnb/listing-photos";
 import { hasPrices, parseAirbnbPrices, type AirbnbPrices } from "@/lib/airbnb/listing-prices";
 import { dubaiToday } from "@/lib/calendar";
+import { isAirbnbCalendarUrl } from "@/lib/ical/url";
+import { syncUnit } from "@/lib/ical/sync";
 import { parseSeasons, seasonsToText } from "@/lib/website-options";
 import { storeWebsitePhoto } from "@/lib/website-photos";
 import { websiteDefaults } from "../[id]/website/defaults";
@@ -251,4 +253,82 @@ export async function saveAirbnbPrices(unitId: string, _prev: PricesState, formD
   if (!data?.length) return { error: NOT_ALLOWED };
   revalidatePath(`/units/${unitId}`);
   return { success: "Prices saved. The website uses them within a minute." };
+}
+
+const newUnitSchema = z.object({
+  building: z.string().trim().min(2, "Enter the building's name.").max(120),
+  unitNumber: z.string().trim().min(1, "Enter the apartment number.").max(30),
+  calendarLink: z.union([z.literal(""), z.string().trim().max(1000)]),
+  bedrooms: z.number().min(0).max(20).nullable(),
+  bathrooms: z.number().min(0).max(20).nullable(),
+  guests: z.number().int().min(1).max(50).nullable(),
+  title: z.string().max(300).nullable(),
+});
+
+/**
+ * "New unit from this listing": a short-term unit for an Airbnb listing not
+ * in the portal yet. Its building is found by name (or added), its rooms and
+ * guests come from the listing, and with the listing's Airbnb calendar link
+ * its reservations are imported at once and every 15 minutes after. Owner and
+ * DET permit are added on the unit afterwards.
+ */
+export async function createUnitFromListing(
+  input: z.input<typeof newUnitSchema>
+): Promise<{ error: string } | { unitId: string; message: string }> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "units.manage")) return { error: "You do not have permission to add units." };
+  const parsed = newUnitSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the new unit's details." };
+  const v = parsed.data;
+  if (v.calendarLink && !isAirbnbCalendarUrl(v.calendarLink)) {
+    return { error: "The calendar link must be the listing's Airbnb calendar export (https://www.airbnb…/calendar/ical/….ics)." };
+  }
+
+  const supabase = await createClient();
+  const name = v.building.replace(/\s+/g, " ");
+  const { data: buildings } = await supabase.from("properties").select("id, name").eq("is_active", true);
+  let propertyId = (buildings ?? []).find((p) => p.name.trim().toLowerCase() === name.toLowerCase())?.id;
+  if (!propertyId) {
+    if (!can(profile.role, "properties.manage")) return { error: `There is no building "${name}" and you cannot add buildings.` };
+    const { data, error } = await supabase.from("properties").insert({ name, kind: "building" }).select("id").single();
+    if (error) return { error: `Could not add the building: ${error.message}` };
+    propertyId = data.id;
+  }
+
+  const { data: existing } = await supabase
+    .from("units")
+    .select("id")
+    .eq("property_id", propertyId)
+    .eq("unit_number", v.unitNumber)
+    .maybeSingle();
+  if (existing) return { error: `${name} ${v.unitNumber} is already in the portal: choose it in the list instead.` };
+
+  const beds = v.bedrooms ?? 1;
+  const { data: unit, error } = await supabase
+    .from("units")
+    .insert({
+      property_id: propertyId,
+      unit_number: v.unitNumber,
+      kind: beds === 0 ? "studio" : /penthouse/i.test(v.title ?? "") ? "penthouse" : /villa/i.test(v.title ?? "") ? "villa" : "apartment",
+      bedrooms: beds,
+      bathrooms: v.bathrooms ?? 1,
+      max_guests: v.guests,
+      furnishing: "fully_furnished",
+      operating_mode: "short_term",
+      airbnb_ical_url: v.calendarLink || null,
+    })
+    .select("id")
+    .single();
+  if (error) return { error: error.message };
+
+  let message = `${name} ${v.unitNumber} added.`;
+  if (v.calendarLink) {
+    const sync = await syncUnit(supabase, unit.id, v.calendarLink);
+    const stays = sync.created ?? 0;
+    message += sync.ok || stays
+      ? ` ${stays} Airbnb ${stays === 1 ? "stay" : "stays"} imported.`
+      : " The first calendar sync failed; it retries every 15 minutes.";
+  }
+  revalidatePath("/units");
+  return { unitId: unit.id, message };
 }

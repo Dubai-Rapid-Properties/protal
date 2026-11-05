@@ -24,6 +24,7 @@ export default async function FromAirbnbListingPage({ searchParams }: { searchPa
     .in("operating_mode", ["short_term", "both"])
     .order("property_name")
     .order("unit_number");
+  const { data: buildings } = await supabase.from("properties").select("name").eq("is_active", true).order("name");
   const list = (units ?? []).map((u) => ({ id: u.id!, label: `${u.property_name} · ${u.unit_number}` }));
 
   return (
@@ -36,6 +37,7 @@ export default async function FromAirbnbListingPage({ searchParams }: { searchPa
       <ListingImport
         bookmarklet={listingBookmarklet(`${env.adminUrl}/units/from-airbnb`)}
         units={list}
+        buildings={(buildings ?? []).map((b) => b.name)}
         presetUnitId={list.some((u) => u.id === unit) ? unit! : null}
       />
     </>
