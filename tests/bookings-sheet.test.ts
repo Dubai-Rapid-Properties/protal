@@ -166,3 +166,21 @@ test("the sheet prices unpriced or rate-only bookings, never a full price entere
   assert.equal(sheetMayPrice({ ...sheetPrice(500, 3), cleaning: 150, gross: 1650, payout: 1650 }), false);
   assert.equal(sheetMayPrice({ ...sheetPrice(500, 3), commission: 225, payout: 1275 }), false, "a channel payout");
 });
+
+test("the team's sheet as it is: guests under \"Column 1\", extra moved/extended columns", () => {
+  const csv = [
+    "Column 1,Activity type,Check IN,Check OUT,Location,Apartment Number,Source,Direct Booking Rate (night),Extended Dates,Moved Location,Moved Apartment Number,Comments",
+    "Harry,Currently Hosting,4-Nov-2026,4-Dec-2026,Cloud Tower by Tiger Properties,2704B,AIRBNB New,,,Cloud Tower by Tiger Properties,2704B,Extension paid 6.5K",
+    "Nazim,Completed,8-Jan-2026,6-May-2026,Cloud Tower by Tiger Properties,406A,Private Guest,,,,,Possible extension",
+  ].join("\n");
+  const { rows, problems } = parseBookingsSheet(csv);
+  assert.deepEqual(problems, []);
+  assert.equal(rows.length, 2);
+  assert.deepEqual([rows[0].guest, rows[0].apartment, rows[0].location, rows[0].channel], ["Harry", "2704B", "Cloud Tower by Tiger Properties", null]);
+  assert.equal(rows[0].comments, "Extension paid 6.5K");
+  assert.equal(rows[1].channel, "direct");
+  // A title row above the header is skipped.
+  const titled = parseBookingsSheet(`Event_schedule,,,,,,\n${csv}`);
+  assert.equal(titled.rows.length, 2);
+  assert.equal(titled.rows[0].line, 3);
+});
