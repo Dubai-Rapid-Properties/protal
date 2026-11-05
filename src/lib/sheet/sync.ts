@@ -127,7 +127,15 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
         continue;
       }
 
-      const unit = matchUnit(row, units);
+      // A guest moved to another apartment stays there: "Moved Location" / "Moved Apartment Number".
+      const moved = row.movedApartment
+        ? matchUnit({ location: row.movedLocation || row.location, apartment: row.movedApartment }, units)
+        : null;
+      if (row.movedApartment && !moved) {
+        problem(`${label(row)}: no unit in the portal matches the moved apartment ${row.movedLocation} ${row.movedApartment}.`);
+        continue;
+      }
+      const unit = moved ?? matchUnit(row, units);
       if (!unit) {
         problem(`${label(row)}: no unit in the portal matches this building and apartment.`);
         continue;
@@ -140,7 +148,25 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
       }
 
       const bookings = await loadBookings(unit.id);
-      const match = matchBooking(row, bookings);
+      let match = matchBooking(row, bookings);
+
+      // Moved: the booking may still be on the apartment the guest booked; it moves with them.
+      const booked = moved ? matchUnit(row, units) : null;
+      if (moved && !match && booked && booked.id !== moved.id) {
+        const left = await loadBookings(booked.id);
+        const before = matchBooking(row, left);
+        if (before && !before.icalUid && !["cancelled", "no_show", "checked_out"].includes(before.status)) {
+          const { error } = await client.from("bookings").update({ unit_id: moved.id }).eq("id", before.id);
+          if (error) {
+            problem(`${label(row)}: not moved to ${unitName} - ${await explainClash(client, error, moved.id, row)}`);
+            continue;
+          }
+          left.splice(left.indexOf(before), 1);
+          bookings.push(before);
+          match = before;
+          result.updated++;
+        }
+      }
 
       if (match) {
         if (match.status === "cancelled" || match.status === "no_show") {
@@ -153,7 +179,12 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
         if (!match.sheetName) changes.sheet_name = sheetName(row.guest);
         // A guest already in or gone is not moved or cancelled from the sheet.
         const upcoming = match.status === "confirmed" || match.status === "tentative" || match.status === "inquiry";
-        if (!upcoming) {
+        if (match.status === "checked_in") {
+          // In house: an extension (or an earlier departure) moves the check-out, never the arrival.
+          if (row.status !== "cancelled" && match.checkOut !== row.checkOut && row.checkOut > today) {
+            changes.check_out = row.checkOut;
+          }
+        } else if (!upcoming) {
           // nothing but the sheet name
         } else if (row.status === "cancelled") {
           Object.assign(changes, {
@@ -177,7 +208,7 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
           }
         }
         const meaningful = Boolean(
-          changes.status || changes.check_in || changes.check_in_time || changes.check_out_time || price
+          changes.status || changes.check_in || changes.check_out || changes.check_in_time || changes.check_out_time || price
         );
         if (!meaningful && !changes.sheet_name) continue;
 

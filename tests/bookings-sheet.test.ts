@@ -195,3 +195,13 @@ test("\"Extended Dates\" is the check-out once a stay is extended", () => {
   assert.deepEqual([alex.checkOut, alex.extended], ["2026-12-09", true]);
   assert.deepEqual([sam.checkOut, sam.extended], ["2026-12-05", false]);
 });
+
+test("moved guests: the moved columns are read, and never taken for the booked apartment", () => {
+  const csv = [
+    "Column 1,Activity type,Check IN,Check OUT,Location,Apartment Number,Source,Moved Location,Moved Apartment Number,Comments",
+    "Obad,Upcoming,15-Dec-2026,17-Dec-2026,Cloud Tower by Tiger Properties,2704,Private Guest,Cloud Tower by Tiger Properties,406,booked 2704 but we shift him to 406",
+  ].join("\n");
+  const [obad] = parseBookingsSheet(csv).rows;
+  assert.deepEqual([obad.location, obad.apartment], ["Cloud Tower by Tiger Properties", "2704"]);
+  assert.deepEqual([obad.movedLocation, obad.movedApartment], ["Cloud Tower by Tiger Properties", "406"]);
+});
