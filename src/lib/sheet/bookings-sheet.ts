@@ -109,12 +109,18 @@ function channelOf(source: string, comments: string): SheetChannel | null {
 }
 
 export function parseBookingsSheet(text: string): SheetParseResult {
-  const table = parseCsv(text);
+  const all = parseCsv(text);
   const problems: string[] = [];
+  // The header is the first row naming the check-in and check-out columns (a title row may come first).
+  const isHeader = (r: string[]) => r.some((h) => /^check\s*-?\s*in$/i.test(h.trim())) && r.some((h) => /^check\s*-?\s*out$/i.test(h.trim()));
+  const start = Math.max(0, all.slice(0, 10).findIndex(isHeader));
+  const table = all.slice(start);
   const header = (table[0] ?? []).map((h) => h.trim().toLowerCase());
   const col = (test: RegExp) => header.findIndex((h) => test.test(h));
+  // The guest's name: "GUEST", or a column left with Google Sheets' own name ("Column 1").
+  const guestCol = col(/^guest|^name$|guest name/) >= 0 ? col(/^guest|^name$|guest name/) : col(/^column\s*1$/);
   const at = {
-    guest: col(/^guest/),
+    guest: guestCol,
     status: col(/activity|status/),
     checkIn: col(/^check\s*-?\s*in$/),
     checkOut: col(/^check\s*-?\s*out$/),
@@ -133,7 +139,7 @@ export function parseBookingsSheet(text: string): SheetParseResult {
 
   const rows: SheetRow[] = [];
   table.slice(1).forEach((r, i) => {
-    const line = i + 2;
+    const line = start + i + 2;
     const guest = cell(r, at.guest).replace(/\s+/g, " ");
     const apartment = cell(r, at.apartment);
     const checkInText = cell(r, at.checkIn);
