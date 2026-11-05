@@ -184,3 +184,14 @@ test("the team's sheet as it is: guests under \"Column 1\", extra moved/extended
   assert.equal(titled.rows.length, 2);
   assert.equal(titled.rows[0].line, 3);
 });
+
+test("\"Extended Dates\" is the check-out once a stay is extended", () => {
+  const csv = [
+    "Column 1,Activity type,Check IN,Check OUT,Location,Apartment Number,Source,Extended Dates,Comments",
+    "Alex,Currently Hosting,15-Oct-2026,30-Nov-2026,Apex,1907,AIRBNB New,9-Dec-2026,",
+    "Sam,Upcoming,1-Dec-2026,5-Dec-2026,Apex,1908,Private Guest,,",
+  ].join("\n");
+  const [alex, sam] = parseBookingsSheet(csv).rows;
+  assert.deepEqual([alex.checkOut, alex.extended], ["2026-12-09", true]);
+  assert.deepEqual([sam.checkOut, sam.extended], ["2026-12-05", false]);
+});

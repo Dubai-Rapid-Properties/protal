@@ -31,6 +31,8 @@ export interface SheetRow {
   checkOutTime: string | null;
   /** AED a night, from the rate column; null when empty. */
   nightlyRate: number | null;
+  /** The check-out comes from the "Extended Dates" column. */
+  extended?: boolean;
   comments: string;
 }
 
@@ -131,6 +133,7 @@ export function parseBookingsSheet(text: string): SheetParseResult {
     checkInTime: col(/^check\s*-?\s*in.*time/),
     checkOutTime: col(/^check\s*-?\s*out.*time/),
     rate: col(/rate|price/),
+    extended: col(/extend/),
   };
   for (const key of ["guest", "checkIn", "checkOut", "apartment"] as const) {
     if (at[key] < 0) return { rows: [], problems: [`The sheet has no "${key}" column; nothing was read.`] };
@@ -147,7 +150,10 @@ export function parseBookingsSheet(text: string): SheetParseResult {
     if (!guest && !apartment && !checkInText) return;
     const status = statusOf(cell(r, at.status)) ?? "upcoming";
     const checkIn = parseSheetDate(checkInText);
-    const checkOut = parseSheetDate(checkOutText);
+    const booked = parseSheetDate(checkOutText);
+    // "Extended Dates": the check-out after an extension, when later than the one booked.
+    const extended = parseSheetDate(cell(r, at.extended));
+    const checkOut = booked && extended && extended > booked ? extended : booked;
     if (!checkIn || !checkOut || checkOut <= checkIn) {
       // Finished or cancelled stays are history: not worth a warning.
       if (status === "upcoming" || status === "hosting") {
@@ -172,6 +178,7 @@ export function parseBookingsSheet(text: string): SheetParseResult {
       checkInTime: parseSheetTime(cell(r, at.checkInTime)),
       checkOutTime: parseSheetTime(cell(r, at.checkOutTime)),
       nightlyRate: parseSheetAmount(cell(r, at.rate)),
+      extended: Boolean(booked && extended && extended > booked),
       comments,
     });
   });

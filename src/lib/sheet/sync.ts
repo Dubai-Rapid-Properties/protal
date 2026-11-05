@@ -293,23 +293,30 @@ async function applyAirbnbExtension(
   const key = `${sheetName(row.guest)} (extension)`;
   const existing = bookings.find((b) => b.sheetName === key && live(b) && b.checkOut > today);
 
-  /* The stay being extended: the same check-in and an earlier check-out, or ending the day this row starts */
-  const stay = bookings
-    .filter(
-      (b) =>
-        live(b) &&
-        b.sheetName !== key &&
-        ((b.checkIn === row.checkIn && b.checkOut < row.checkOut) ||
-          (b.checkOut === row.checkIn && b.checkIn < row.checkIn))
-    )
-    .sort((x, y) => y.checkOut.localeCompare(x.checkOut))[0];
+  /*
+   * The stay being extended, ending before the sheet's check-out: the same
+   * guest's stay over these dates, else (when the row says it is an
+   * extension) the stay with the same check-in or ending the day this row starts.
+   */
+  const first = (n: string | null) => (n ?? "").toLowerCase().match(/[\p{L}]+/u)?.[0] ?? "";
+  const said = row.extended || /extend|extension/i.test(row.comments);
+  const sameGuest = (b: PortalBooking) => first(row.guest).length >= 3 && first(row.guest) === first(b.guestName);
+  const candidates = bookings.filter(
+    (b) =>
+      live(b) &&
+      b.sheetName !== key &&
+      b.checkOut < row.checkOut &&
+      (b.checkOut > row.checkIn || b.checkOut === row.checkIn) &&
+      b.checkIn <= row.checkOut
+  );
+  const stay =
+    candidates.filter(sameGuest).sort((x, y) => y.checkOut.localeCompare(x.checkOut))[0] ??
+    (said
+      ? candidates
+          .filter((b) => b.checkIn === row.checkIn || (b.checkOut === row.checkIn && b.checkIn < row.checkIn))
+          .sort((x, y) => y.checkOut.localeCompare(x.checkOut))[0]
+      : undefined);
   if (!stay) return;
-  /* A row of its own is an extension only when it says so, or names the same guest */
-  if (stay.checkOut === row.checkIn) {
-    const first = (n: string | null) => (n ?? "").toLowerCase().match(/[\p{L}]+/u)?.[0] ?? "";
-    const said = /extend|extension/i.test(row.comments);
-    if (!said && (first(row.guest).length < 3 || first(row.guest) !== first(stay.guestName))) return;
-  }
   /* Nights some other booking already holds (Airbnb's own extension, a new guest) are left alone */
   if (bookings.some((b) => live(b) && b !== stay && b.sheetName !== key && b.checkIn < row.checkOut && b.checkOut > stay.checkOut)) return;
 
