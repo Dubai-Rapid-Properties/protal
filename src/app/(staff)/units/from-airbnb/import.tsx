@@ -6,6 +6,7 @@ import { ClipboardPaste, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Callout } from "@/components/domain/shared";
@@ -20,6 +21,7 @@ import { WebsiteForm, type WebsiteDefaults } from "../[id]/website/website-form"
 import {
   applyAirbnbFacts,
   copyAirbnbPhotos,
+  createUnitFromListing,
   loadUnitWebsite,
   readAirbnbListing,
   type ImportUnit,
@@ -48,10 +50,13 @@ function rememberedUnit(): string | null {
 export function ListingImport({
   bookmarklet,
   units,
+  buildings = [],
   presetUnitId,
 }: {
   bookmarklet: string;
   units: Unit[];
+  /** Building names, offered when a new unit is made from the listing */
+  buildings?: string[];
   presetUnitId: string | null;
 }) {
   const [capture, setCapture] = React.useState<ListingCapture | null>(null);
@@ -112,6 +117,7 @@ export function ListingImport({
       <Found
         found={capture}
         units={units}
+        buildings={buildings}
         initialUnit={capture.unitId ?? presetUnitId ?? rememberedUnit() ?? ""}
         onReady={setReady}
         onReset={reset}
@@ -269,15 +275,19 @@ function Found(props: React.ComponentProps<typeof Review>) {
   );
 }
 
+const NEW_UNIT = "__new";
+
 function Review({
   found,
   units,
+  buildings = [],
   initialUnit,
   onReady,
   onReset,
 }: {
   found: Found;
   units: Unit[];
+  buildings?: string[];
   initialUnit: string;
   onReady: (r: Ready) => void;
   onReset: () => void;
@@ -288,6 +298,7 @@ function Review({
   const [keep, setKeep] = React.useState(false);
   const [progress, setProgress] = React.useState<{ done: number; total: number } | null>(null);
   const [error, setError] = React.useState<string>();
+  const [newUnit, setNewUnit] = React.useState({ building: "", unitNumber: "", calendarLink: "" });
 
   const toggle = (src: string) =>
     setPicked((set) => {
@@ -302,7 +313,23 @@ function Review({
     setError(undefined);
     setProgress({ done: 0, total: 0 });
     try {
-      const loaded = await loadUnitWebsite(unitId);
+      let target = unitId;
+      if (unitId === NEW_UNIT) {
+        const made = await createUnitFromListing({
+          ...newUnit,
+          bedrooms: listing.bedrooms,
+          bathrooms: listing.bathrooms,
+          guests: listing.guests,
+          title: listing.title,
+        });
+        if ("error" in made) {
+          setProgress(null);
+          return setError(made.error);
+        }
+        toast.success(made.message);
+        target = made.unitId;
+      }
+      const loaded = await loadUnitWebsite(target);
       if ("error" in loaded) {
         setProgress(null);
         return setError(loaded.error);
@@ -392,12 +419,52 @@ function Review({
         <div className="space-y-1.5 sm:col-span-2">
           <Select aria-label="Unit" value={unitId} onChange={(e) => setUnitId(e.target.value)}>
             <option value="">Select the unit</option>
+            <option value={NEW_UNIT}>+ New unit from this listing</option>
             {units.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.label}
               </option>
             ))}
           </Select>
+          {unitId === NEW_UNIT && (
+            <div className="grid gap-3 pt-2 sm:grid-cols-2">
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">Building</span>
+                <Input
+                  list="airbnb-new-unit-buildings"
+                  value={newUnit.building}
+                  onChange={(e) => setNewUnit({ ...newUnit, building: e.target.value })}
+                  placeholder="e.g. Burj Royale"
+                />
+                <datalist id="airbnb-new-unit-buildings">
+                  {buildings.map((b) => (
+                    <option key={b} value={b} />
+                  ))}
+                </datalist>
+              </label>
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">Apartment number</span>
+                <Input
+                  value={newUnit.unitNumber}
+                  onChange={(e) => setNewUnit({ ...newUnit, unitNumber: e.target.value })}
+                  placeholder="e.g. 2104"
+                />
+              </label>
+              <label className="space-y-1 text-sm sm:col-span-2">
+                <span className="font-medium">Airbnb calendar link (optional)</span>
+                <Input
+                  value={newUnit.calendarLink}
+                  onChange={(e) => setNewUnit({ ...newUnit, calendarLink: e.target.value })}
+                  placeholder="https://www.airbnb.co.uk/calendar/ical/….ics?t=…"
+                />
+                <span className="block text-xs text-[var(--muted-foreground)]">
+                  On Airbnb: the listing&apos;s Calendar → Availability → Connect calendars → Export calendar. With it, the
+                  listing&apos;s bookings come into the portal at once and every 15 minutes, and its prices sync. Add the owner
+                  and DET permit on the unit afterwards.
+                </span>
+              </label>
+            </div>
+          )}
           {found.unitId && unitId === found.unitId && (
             <p className="text-xs text-[var(--muted-foreground)]">Found from the unit&apos;s Airbnb calendar.</p>
           )}
@@ -446,7 +513,11 @@ function Review({
           <RotateCcw className="size-4" />
           Start over
         </Button>
-        <Button type="button" disabled={!unitId} onClick={go}>
+        <Button
+          type="button"
+          disabled={!unitId || (unitId === NEW_UNIT && (newUnit.building.trim().length < 2 || !newUnit.unitNumber.trim()))}
+          onClick={go}
+        >
           {picked.size ? `Copy ${picked.size} photos and fill the form` : "Fill the form"}
         </Button>
       </div>
