@@ -33,6 +33,9 @@ export interface SheetRow {
   nightlyRate: number | null;
   /** The check-out comes from the "Extended Dates" column. */
   extended?: boolean;
+  /** "Moved Location" / "Moved Apartment Number": where the guest stays instead; empty when not moved. */
+  movedLocation?: string;
+  movedApartment?: string;
   comments: string;
 }
 
@@ -126,14 +129,16 @@ export function parseBookingsSheet(text: string): SheetParseResult {
     status: col(/activity|status/),
     checkIn: col(/^check\s*-?\s*in$/),
     checkOut: col(/^check\s*-?\s*out$/),
-    location: col(/location|building|property/),
-    apartment: col(/apartment|unit/),
+    location: col(/^(?!moved).*(location|building|property)/),
+    apartment: col(/^(?!moved).*(apartment|unit)/),
     source: col(/source|channel/),
     comments: col(/comment|note/),
     checkInTime: col(/^check\s*-?\s*in.*time/),
     checkOutTime: col(/^check\s*-?\s*out.*time/),
     rate: col(/rate|price/),
     extended: col(/extend/),
+    movedLocation: col(/moved.*(location|building)/),
+    movedApartment: col(/moved.*(apartment|unit)/),
   };
   for (const key of ["guest", "checkIn", "checkOut", "apartment"] as const) {
     if (at[key] < 0) return { rows: [], problems: [`The sheet has no "${key}" column; nothing was read.`] };
@@ -179,6 +184,8 @@ export function parseBookingsSheet(text: string): SheetParseResult {
       checkOutTime: parseSheetTime(cell(r, at.checkOutTime)),
       nightlyRate: parseSheetAmount(cell(r, at.rate)),
       extended: Boolean(booked && extended && extended > booked),
+      movedLocation: cell(r, at.movedLocation),
+      movedApartment: cell(r, at.movedApartment),
       comments,
     });
   });
