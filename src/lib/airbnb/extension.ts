@@ -301,6 +301,71 @@ function airbnbScript(adminUrl: string): string {
     });
   }
 
+  // "Copy all photos": reads every listing's own page (in this tab, as the signed-in host), sends
+  // its photos to the portal, which copies them to the unit's website gallery a few at a time.
+  var copying = false;
+  function sendPhotos(d) {
+    return new Promise(function (resolve) {
+      try {
+        chrome.runtime.sendMessage({ photos: d }, function (res) {
+          resolve(chrome.runtime.lastError || !res ? { status: "error", message: RELOAD } : res);
+        });
+      } catch (e) {
+        resolve({ status: "error", message: isStale(e) ? RELOAD : String(e && e.message) });
+      }
+    });
+  }
+  function copyAllPhotos() {
+    if (copying) return note("already copying photos.");
+    var listings = pageListings();
+    if (!listings.length) return note("open Calendar (Month view) on Airbnb first: the list of listings comes from there.", true);
+    copying = true;
+    var results = [];
+    var i = 0;
+    function next() {
+      if (i >= listings.length) {
+        copying = false;
+        return note("photos of all " + listings.length + " listings:\\n• " + results.join("\\n• "), false, true);
+      }
+      var here = listings[i++];
+      note("copying photos: " + i + " of " + listings.length + ", " + here.title + "…", false, true);
+      var url = location.origin + "/rooms/" + here.id;
+      fetch(url, { credentials: "include", cache: "no-store" })
+        .then(function (r) { return r.ok ? r.text() : ""; })
+        .catch(function () { return ""; })
+        .then(function (html) {
+          if (!html) {
+            results.push(here.title + ": the listing page could not be opened");
+            return next();
+          }
+          var d;
+          try { d = collectAirbnbListing(new DOMParser().parseFromString(html, "text/html"), url, false, false); } catch (e) { d = null; }
+          if (!d || !d.photos.length) {
+            results.push(here.title + ": no photos found on the listing page");
+            return next();
+          }
+          var rounds = 0;
+          (function send() {
+            sendPhotos(d).then(function (res) {
+              if (res.status === "signin") {
+                copying = false;
+                return note(res.message, true, true);
+              }
+              if (res.status === "saved" && res.left > 0 && ++rounds < 20) {
+                note("copying photos: " + i + " of " + listings.length + ", " + here.title + " (" + res.left + " left)…", false, true);
+                return send();
+              }
+              if (res.status === "saved") results.push(here.title + ": " + res.photos + " photos on " + res.unit + (res.failed ? " (" + res.failed + " could not be copied)" : ""));
+              else if (res.status === "unchanged") results.push(here.title + ": already has its " + res.photos + " photos");
+              else results.push(here.title + ": " + (res.message || "not saved"));
+              next();
+            });
+          })();
+        });
+    }
+    next();
+  }
+
   function sendReservation() {
     try {
       open("/bookings/from-airbnb", { u: location.href, t: String(document.body.innerText || "").slice(0, 60000) });
@@ -341,6 +406,7 @@ function airbnbScript(adminUrl: string): string {
     "<button data-do='listing'>Import listing<small>Details and photos, or prices from Pricing / Calendar</small></button>" +
     "<button data-do='reservation'>Send reservation<small>Guest, dates and payout</small></button>" +
     "<button data-do='all'>Sync all listings<small>Every listing's prices, one after the other</small></button>" +
+    "<button data-do='photos'>Copy all photos<small>Every listing's photos to the Holiday Homes website</small></button>" +
     "<button data-do='auto' class='hide'></button>" +
     "<button data-do='hide' class='hide'>Hide this button on this page</button>" +
     "</div>" +
@@ -382,6 +448,7 @@ function airbnbScript(adminUrl: string): string {
     if (what === "listing") importListing();
     else if (what === "reservation") sendReservation();
     else if (what === "hide") host.remove();
+    else if (what === "photos") copyAllPhotos();
     else if (what === "all") {
       if (walking()) stopWalk();
       else startWalk();
@@ -433,6 +500,29 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
     .then(function (res) {
       // Signed out: the portal sends the request to its sign-in page.
       if (res.type === "opaqueredirect") return { status: "signin", message: "Sign in to the D|R|P portal in this browser to sync prices." };
+      return res.json().catch(function () {
+        return { status: "error", message: "The portal answered HTTP " + res.status + "." };
+      });
+    })
+    .catch(function () {
+      return { status: "error", message: "The portal could not be reached." };
+    })
+    .then(reply);
+  return true;
+});
+
+// "Copy all photos": one listing's photos at a time, with the portal session.
+chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
+  if (!msg || !msg.photos) return;
+  fetch(PORTAL + "/units/from-airbnb/photos", {
+    method: "POST",
+    credentials: "include",
+    redirect: "manual",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(msg.photos),
+  })
+    .then(function (res) {
+      if (res.type === "opaqueredirect") return { status: "signin", message: "Sign in to the D|R|P portal in this browser to copy photos." };
       return res.json().catch(function () {
         return { status: "error", message: "The portal answered HTTP " + res.status + "." };
       });
@@ -498,6 +588,11 @@ A listing picked from the calendar's list of listings is synced after a reload.
 Sync all listings (in the button's menu, on the Calendar in Month view): opens
 every listing's calendar in turn, sends its prices for the next three months,
 and lists the results at the end. Leave the tab alone until it is done.
+
+Copy all photos (in the button's menu, on the Calendar in Month view): reads
+every listing's page and copies its photos, in Airbnb's order, to the unit's
+gallery on the Holiday Homes website (photos added in the portal stay, after
+them). Leave the tab open until the results are listed.
 
 Update: download the extension again from the portal's Import from Airbnb page,
 replace this folder's files, and click the reload arrow on chrome://extensions.
