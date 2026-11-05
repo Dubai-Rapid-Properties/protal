@@ -207,33 +207,80 @@ function airbnbScript(adminUrl: string): string {
   function walking() { return !!walkState(); }
 
   // The host's listings, as the calendar's list of listings has them in the page.
-  function pageListings() {
+  function pageListings(doc) {
     var out = [];
     var seen = {};
+    function add(id, title) {
+      id = String(id);
+      if (!/^\\d{3,25}$/.test(id) || seen[id] || out.length >= 200) return;
+      seen[id] = true;
+      out.push({ id: id, title: String(title || id).slice(0, 80) });
+    }
     function walk(o, depth) {
       if (!o || typeof o !== "object" || depth > 40 || out.length >= 200) return;
       if (Array.isArray(o)) {
         for (var i = 0; i < o.length; i++) walk(o[i], depth + 1);
         return;
       }
-      if (o.__typename === "HostCalendarThumbnailListingAttributes" && o.listingId && !seen[o.listingId]) {
-        seen[o.listingId] = true;
-        out.push({ id: String(o.listingId), title: String(o.title || o.listingId).slice(0, 80) });
+      // The calendar's list of listings, under the names Airbnb's pages have used.
+      if (o.listingId && /Listing/.test(String(o.__typename || "")) && (o.title || o.name || o.nickname)) {
+        add(o.listingId, o.title || o.name || o.nickname);
       }
       for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) walk(o[k], depth + 1);
     }
-    var scripts = document.querySelectorAll('script[type="application/json"]');
+    var scripts = doc.querySelectorAll('script[type="application/json"], script[id^="data-"]');
     for (var s = 0; s < scripts.length; s++) {
       try { walk(JSON.parse(scripts[s].textContent || ""), 0); } catch (e) {}
+    }
+    // Links to listings (the calendar's thumbnails, the Listings page's rows).
+    var links = doc.querySelectorAll("a[href]");
+    for (var l = 0; l < links.length; l++) {
+      var m = (links[l].getAttribute("href") || "").match(/\\/(?:multicalendar|rooms|hosting\\/listings\\/editor|manage-your-space)\\/(\\d{3,25})/);
+      if (m) add(m[1], (links[l].getAttribute("aria-label") || links[l].textContent || "").trim());
     }
     return out;
   }
 
+  // The listings: this page, else this page and the Listings page read afresh from Airbnb.
+  function findListings(done) {
+    var found = pageListings(document);
+    if (found.length > 1) return done(found);
+    var pages = [location.href, location.origin + "/hosting/listings"];
+    (function next() {
+      var url = pages.shift();
+      if (!url) return done(found);
+      fetch(url, { credentials: "include", cache: "no-store" })
+        .then(function (r) { return r.ok ? r.text() : ""; })
+        .catch(function () { return ""; })
+        .then(function (html) {
+          if (html) {
+            var more = pageListings(new DOMParser().parseFromString(html, "text/html"));
+            // Listing numbers anywhere in the page's data, when no named list was found.
+            if (!more.length) {
+              var re = /"listingId"\\s*:\\s*"?(\\d{6,25})/g;
+              var m;
+              var seenIds = {};
+              while ((m = re.exec(html)) && more.length < 200) {
+                if (!seenIds[m[1]]) { seenIds[m[1]] = true; more.push({ id: m[1], title: "Listing " + m[1] }); }
+              }
+            }
+            var have = {};
+            found.forEach(function (f) { have[f.id] = true; });
+            more.forEach(function (f) { if (!have[f.id]) { have[f.id] = true; found.push(f); } });
+          }
+          if (found.length > 1) return done(found);
+          next();
+        });
+    })();
+  }
+
   function startWalk() {
-    var listings = pageListings();
-    if (!listings.length) return note("open Calendar (Month view) on Airbnb first: the list of listings comes from there.", true);
-    saveWalk({ listings: listings, i: 0, results: [] });
-    openNext();
+    note("finding your listings…", false, true);
+    findListings(function (listings) {
+      if (!listings.length) return note("no listings were found on this page. Open Calendar or Listings on Airbnb, reload (F5) and try again.", true);
+      saveWalk({ listings: listings, i: 0, results: [] });
+      openNext();
+    });
   }
   function stopWalk(why) {
     saveWalk(null);
@@ -317,9 +364,17 @@ function airbnbScript(adminUrl: string): string {
   }
   function copyAllPhotos() {
     if (copying) return note("already copying photos.");
-    var listings = pageListings();
-    if (!listings.length) return note("open Calendar (Month view) on Airbnb first: the list of listings comes from there.", true);
     copying = true;
+    note("finding your listings…", false, true);
+    findListings(function (listings) {
+      if (!listings.length) {
+        copying = false;
+        return note("no listings were found on this page. Open Calendar or Listings on Airbnb, reload (F5) and try again.", true);
+      }
+      copyEach(listings);
+    });
+  }
+  function copyEach(listings) {
     var results = [];
     var i = 0;
     function next() {
