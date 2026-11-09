@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { INCIDENT_CATEGORY, INCIDENT_STATUS, optionsFrom } from "@/lib/labels";
 import { MAX_INCIDENT_PHOTOS } from "@/lib/incidents";
 import { shrinkPhoto } from "@/lib/shrink-photo";
+import { isVideoFile } from "@/lib/media";
+import { uploadVideo } from "@/lib/upload-video";
 import { addIncidentPhoto, createIncident } from "../actions";
 
 export interface BookingOption {
@@ -56,7 +58,7 @@ export function IncidentForm({
     if (!files?.length) return;
     const room = MAX_INCIDENT_PHOTOS - photos.length;
     const picked = Array.from(files).slice(0, room);
-    if (files.length > room) toast.error(`An incident holds up to ${MAX_INCIDENT_PHOTOS} photos.`);
+    if (files.length > room) toast.error(`An incident holds up to ${MAX_INCIDENT_PHOTOS} photos and videos.`);
     setPhotos((list) => [
       ...list,
       ...picked.map((file) => ({
@@ -91,8 +93,16 @@ export function IncidentForm({
       // One at a time: each request stays under the upload size limit.
       let failed = 0;
       for (const [i, p] of photos.entries()) {
-        setStep(`Uploading photo ${i + 1} of ${photos.length}…`);
+        setStep(`Uploading ${i + 1} of ${photos.length}…`);
         try {
+          if (isVideoFile(p.file)) {
+            const error = await uploadVideo("incident", saved.id, p.file);
+            if (error) {
+              failed++;
+              toast.error(error);
+            }
+            continue;
+          }
           const data = new FormData();
           data.set("photo", await shrinkPhoto(p.file));
           const result = await addIncidentPhoto(saved.id, data);
@@ -106,7 +116,7 @@ export function IncidentForm({
         }
       }
 
-      if (failed) toast.warning("Incident saved. Add the missing photos on its page.");
+      if (failed) toast.warning("Incident saved. Add the missing photos or videos on its page.");
       else toast.success("Incident saved.");
       router.push(`/incidents/${saved.id}`);
     } catch {
@@ -170,16 +180,20 @@ export function IncidentForm({
         />
       </FormSection>
       <FormSection
-        title="Photos"
-        description="Photos of the mess or damage help with Airbnb claims and deposit deductions."
+        title="Photos and videos"
+        description="Photos and videos of the mess or damage help with Airbnb claims and deposit deductions."
         columns={1}
       >
         {photos.length > 0 && (
           <ul className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
             {photos.map((p, i) => (
               <li key={p.key} className="relative overflow-hidden rounded-md border border-[var(--border)]">
-                {/* eslint-disable-next-line @next/next/no-img-element -- local preview of a chosen file */}
-                <img src={p.preview} alt={`Photo ${i + 1}`} className="aspect-square w-full object-cover" />
+                {isVideoFile(p.file) ? (
+                  <video src={p.preview} muted playsInline preload="metadata" className="aspect-square w-full bg-black object-contain" />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element -- local preview of a chosen file
+                  <img src={p.preview} alt={`Photo ${i + 1}`} className="aspect-square w-full object-cover" />
+                )}
                 <Button
                   type="button"
                   size="icon"
@@ -199,7 +213,7 @@ export function IncidentForm({
           <input
             ref={fileInput}
             type="file"
-            accept="image/*"
+            accept="image/*,video/mp4,video/quicktime,video/webm"
             multiple
             className="hidden"
             onChange={(e) => choose(e.target.files)}
@@ -211,10 +225,10 @@ export function IncidentForm({
             onClick={() => fileInput.current?.click()}
           >
             <ImagePlus className="size-4" />
-            {photos.length ? "Add more photos" : "Add photos"}
+            {photos.length ? "Add more" : "Add photos or videos"}
           </Button>
           <p className="mt-1.5 text-xs text-[var(--muted-foreground)]">
-            Up to {MAX_INCIDENT_PHOTOS} photos. On a phone you can take them with the camera.
+            Up to {MAX_INCIDENT_PHOTOS} photos and videos (each video up to 50 MB, about a minute). On a phone you can take them with the camera.
           </p>
         </div>
       </FormSection>

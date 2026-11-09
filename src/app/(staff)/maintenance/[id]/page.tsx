@@ -179,7 +179,7 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
 
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Photos</CardTitle>
+              <CardTitle className="text-base">Photos &amp; videos</CardTitle>
             </CardHeader>
             <CardContent>
               <TicketPhotos

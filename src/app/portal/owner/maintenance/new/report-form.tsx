@@ -55,7 +55,7 @@ export function ReportForm({
       <FormSection title="What is the issue">
         <TicketFields />
       </FormSection>
-      <FormSection title="Photos" description="Photos of the problem help us fix it faster." columns={1}>
+      <FormSection title="Photos and videos" description="Photos and videos of the problem help us fix it faster." columns={1}>
         <PhotoChooser files={photos} onChange={setPhotos} disabled={uploading || Boolean(state.id)} />
       </FormSection>
       <SubmitBar

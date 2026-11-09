@@ -169,7 +169,7 @@ export default async function IncidentPage({ params }: { params: Promise<{ id: s
 
         <Card className="lg:col-span-3">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Photos</CardTitle>
+            <CardTitle className="text-base">Photos &amp; videos</CardTitle>
           </CardHeader>
           <CardContent>
             <IncidentPhotos

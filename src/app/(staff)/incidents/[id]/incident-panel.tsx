@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { INCIDENT_STATUS, optionsFrom } from "@/lib/labels";
 import { shrinkPhoto } from "@/lib/shrink-photo";
+import { isVideoFile, isVideoPath } from "@/lib/media";
+import { uploadVideo } from "@/lib/upload-video";
 import {
   addIncidentComment,
   addIncidentPhoto,
@@ -177,6 +179,12 @@ export function IncidentPhotos({
     // One at a time: each request stays under the upload size limit.
     for (const original of chosen) {
       try {
+        if (isVideoFile(original)) {
+          const error = await uploadVideo("incident", incidentId, original);
+          if (error) toast.error(error);
+          else added++;
+          continue;
+        }
         const data = new FormData();
         data.set("photo", await shrinkPhoto(original));
         const result = await addIncidentPhoto(incidentId, data);
@@ -190,13 +198,13 @@ export function IncidentPhotos({
     }
     if (fileInput.current) fileInput.current.value = "";
     if (added) {
-      toast.success(added === 1 ? "Photo added." : `${added} photos added.`);
+      toast.success(added === 1 ? "Added." : `${added} added.`);
       router.refresh();
     }
   }
 
   async function remove(path: string) {
-    if (!window.confirm("Remove this photo? It cannot be recovered.")) return;
+    if (!window.confirm(`Remove this ${isVideoPath(path) ? "video" : "photo"}? It cannot be recovered.`)) return;
     const result = await removeIncidentPhoto(incidentId, path);
     if (result.error) toast.error(result.error);
     else {
@@ -209,17 +217,21 @@ export function IncidentPhotos({
     <div className="space-y-3">
       {photos.length === 0 ? (
         <p className="text-sm text-[var(--muted-foreground)]">
-          No photos yet. Photos of the mess or damage help with Airbnb claims and deposit deductions.
+          No photos or videos yet. Photos and videos of the mess or damage help with Airbnb claims and deposit deductions.
         </p>
       ) : (
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {photos.map((p, i) => (
             <li key={p.path} className="relative overflow-hidden rounded-md border border-[var(--border)]">
               {p.url ? (
-                <a href={p.url} target="_blank" rel="noreferrer">
-                  {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL */}
-                  <img src={p.url} alt={`Incident photo ${i + 1}`} className="aspect-square w-full object-cover" />
-                </a>
+                isVideoPath(p.path) ? (
+                  <video src={p.url} controls playsInline preload="metadata" className="aspect-square w-full bg-black object-contain" />
+                ) : (
+                  <a href={p.url} target="_blank" rel="noreferrer">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL */}
+                    <img src={p.url} alt={`Incident photo ${i + 1}`} className="aspect-square w-full object-cover" />
+                  </a>
+                )
               ) : (
                 <div className="flex aspect-square items-center justify-center text-xs text-[var(--muted-foreground)]">
                   Could not load
@@ -231,7 +243,7 @@ export function IncidentPhotos({
                   size="icon"
                   variant="secondary"
                   className="absolute right-1.5 top-1.5 size-7"
-                  aria-label="Remove photo"
+                  aria-label={isVideoPath(p.path) ? "Remove video" : "Remove photo"}
                   onClick={() => remove(p.path)}
                 >
                   <X className="size-4" />
@@ -246,14 +258,14 @@ export function IncidentPhotos({
           <input
             ref={fileInput}
             type="file"
-            accept="image/jpeg,image/png,image/webp,image/heic"
+            accept="image/jpeg,image/png,image/webp,image/heic,video/mp4,video/quicktime,video/webm"
             multiple
             className="hidden"
             onChange={(e) => upload(e.target.files)}
           />
           <Button type="button" variant="outline" disabled={uploading > 0} onClick={() => fileInput.current?.click()}>
             {uploading > 0 ? <Loader2 className="size-4 animate-spin" /> : <ImagePlus className="size-4" />}
-            {uploading > 0 ? `Uploading ${uploading}…` : "Add photos"}
+            {uploading > 0 ? `Uploading ${uploading}…` : "Add photos or videos"}
           </Button>
         </>
       )}

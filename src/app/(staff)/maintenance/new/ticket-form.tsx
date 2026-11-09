@@ -64,7 +64,7 @@ export function TicketForm({
       <FormSection title="The issue">
         <TicketFields defaultKind={defaultKind} />
       </FormSection>
-      <FormSection title="Photos" description="Photos of the problem help whoever fixes it." columns={1}>
+      <FormSection title="Photos and videos" description="Photos and videos of the problem help whoever fixes it." columns={1}>
         <PhotoChooser files={photos} onChange={setPhotos} disabled={uploading || Boolean(state.id)} />
       </FormSection>
       <SubmitBar
