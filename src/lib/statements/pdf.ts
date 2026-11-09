@@ -84,12 +84,12 @@ export async function buildStatementPdf(input: {
 
   // Letterhead
   const logoW = 110;
-  page.drawImage(logo, { x: M, y: y - logoW * (506 / 953), width: logoW, height: logoW * (506 / 953) });
+  page.drawImage(logo, { x: M, y: y - logoW * (531 / 1000), width: logoW, height: logoW * (531 / 1000) });
   draw("Owner Statement", W - M, y - 12, { size: 15, f: bold, right: true });
   draw(statement.statement_number, W - M, y - 28, { right: true });
   draw(`Period ${period}`, W - M, y - 42, { size: 8.5, color: MUTED, right: true });
   if (statement.issued_on) draw(`Issued ${formatDate(statement.issued_on)}`, W - M, y - 54, { size: 8.5, color: MUTED, right: true });
-  y -= logoW * (506 / 953) + 16;
+  y -= logoW * (531 / 1000) + 16;
   draw(company?.legal_name ?? "DRP Holiday Homes LLC", M, y, { size: 10, f: bold });
   const companyLines = [
     company?.registered_address,
