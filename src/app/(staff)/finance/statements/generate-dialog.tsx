@@ -45,6 +45,30 @@ function UnitSelect({ value, onChange, label }: { value: Unit; onChange: (u: Uni
 }
 
 type Unit = "aed" | "pct";
+type FeeItem = { key: number; description: string; amount: string; unit: Unit };
+type Cuts = Record<string, { value: string; unit: Unit }>;
+
+/** Everything typed into the dialog, kept in this browser until the statement is made (a draft). */
+type Draft = {
+  ownerId: string;
+  periodStart: string;
+  periodEnd: string;
+  feePct: string;
+  feeVat: boolean;
+  utilities: FeeItem[];
+  others: FeeItem[];
+  cuts: Cuts;
+};
+const DRAFT_KEY = "drp:statement-draft";
+
+function readDraft(): Draft | null {
+  try {
+    const d = JSON.parse(window.localStorage.getItem(DRAFT_KEY) ?? "null");
+    return d && typeof d.ownerId === "string" && Array.isArray(d.utilities) && Array.isArray(d.others) ? d : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * A list of fees, item by item - what each is for and its amount - sent as
@@ -59,6 +83,8 @@ function FeeItems({
   hint,
   allowPct = false,
   income,
+  items,
+  onItems,
 }: {
   name: string;
   label: string;
@@ -68,9 +94,11 @@ function FeeItems({
   allowPct?: boolean;
   /** The booking income after deductions, when known. */
   income?: number | null;
+  items: FeeItem[];
+  onItems: (update: (list: FeeItem[]) => FeeItem[]) => void;
 }) {
-  const [items, setItems] = React.useState<{ key: number; description: string; amount: string; unit: Unit }[]>([]);
-  const nextKey = React.useRef(0);
+  const setItems = onItems;
+  const nextKey = { current: items.reduce((max, i) => Math.max(max, i.key + 1), 0) };
   const value = (i: { amount: string; unit: Unit }) =>
     i.unit === "pct" ? (income != null ? Math.round(income * (Number(i.amount) || 0)) / 100 : 0) : Number(i.amount) || 0;
   const total = items.reduce((sum, i) => sum + value(i), 0);
@@ -160,14 +188,17 @@ function BookingDeductions({
   periodStart,
   periodEnd,
   onIncome,
+  cuts,
+  setCuts,
 }: {
   ownerId: string;
   periodStart: string;
   periodEnd: string;
   onIncome: (income: number | null) => void;
+  cuts: Cuts;
+  setCuts: (update: (cuts: Cuts) => Cuts) => void;
 }) {
   const [bookings, setBookings] = React.useState<StatementBooking[] | null>(null);
-  const [cuts, setCuts] = React.useState<Record<string, { value: string; unit: Unit }>>({});
 
   React.useEffect(() => {
     // Remounted (key) when the owner or period changes, so it starts empty.
@@ -276,27 +307,82 @@ export function GenerateStatementDialog({
   const [open, setOpen] = React.useState(false);
   const [state, action] = useActionState<ActionState, FormData>(generateStatement, {});
 
-  React.useEffect(() => {
-    if (state.error) toast.error(state.error);
-  }, [state]);
-
   // Default to the period finance runs on the 15th: 16th to 15th.
   const { start, end } = statementPeriod(dubaiToday());
-  const [ownerId, setOwnerId] = React.useState("");
-  const [periodStart, setPeriodStart] = React.useState(start);
-  const [periodEnd, setPeriodEnd] = React.useState(end);
+  const blank: Draft = { ownerId: "", periodStart: start, periodEnd: end, feePct: "", feeVat: true, utilities: [], others: [], cuts: {} };
+  const [draft, setDraft] = React.useState<Draft>(blank);
+  const [restored, setRestored] = React.useState(false);
   const [income, setIncome] = React.useState<number | null>(null);
+  const loaded = React.useRef(false);
+  const saving = React.useRef(true);
+
+  // The draft left from before (the dialog closed, the page reloaded), the first time the dialog opens.
+  const onOpenChange = (next: boolean) => {
+    if (next && !loaded.current) {
+      loaded.current = true;
+      const saved = readDraft();
+      if (saved) {
+        setDraft({ ...blank, ...saved });
+        setRestored(true);
+      }
+    }
+    setOpen(next);
+  };
+  React.useEffect(() => {
+    if (!loaded.current || !saving.current) return;
+    try {
+      window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch {
+      /* Storage blocked: the dialog still keeps it while the page is open */
+    }
+  }, [draft]);
+  React.useEffect(() => {
+    if (!state.error) return;
+    toast.error(state.error);
+    // Not made: keep the draft for the next try.
+    saving.current = true;
+    try {
+      window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
+  const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
+  /* A different owner or period has other bookings: their deductions start again */
+  const setScope = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch, cuts: {} }));
+  const startOver = () => {
+    try {
+      window.localStorage.removeItem(DRAFT_KEY);
+    } catch {}
+    setDraft(blank);
+    setRestored(false);
+  };
+  const { ownerId, periodStart, periodEnd } = draft;
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button>
           <FilePlus2 className="size-4" />
           Generate statement
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
-        <form action={action}>
+      <DialogContent
+        className="max-h-[90dvh] overflow-y-auto sm:max-w-xl"
+        // A click outside (or Esc) used to close it and lose what was typed: only the close button does now.
+        onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+      >
+        <form
+          action={action}
+          onSubmit={() => {
+            // Made (the page moves to the statement): the draft is done. An error saves it again.
+            saving.current = false;
+            try {
+              window.localStorage.removeItem(DRAFT_KEY);
+            } catch {}
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Generate an owner statement</DialogTitle>
             <DialogDescription>
@@ -307,9 +393,17 @@ export function GenerateStatementDialog({
           </DialogHeader>
 
           <div className="my-4 space-y-4">
+            {restored && (
+              <div className="flex items-center justify-between gap-3 rounded-md bg-[var(--muted)] px-3 py-2 text-sm">
+                <span>Your draft is back where you left it.</span>
+                <Button type="button" size="sm" variant="ghost" onClick={startOver}>
+                  Start over
+                </Button>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="ownerId">Owner</Label>
-              <Select id="ownerId" name="ownerId" required value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+              <Select id="ownerId" name="ownerId" required value={ownerId} onChange={(e) => setScope({ ownerId: e.target.value })}>
                 <option value="" disabled>
                   Select an owner
                 </option>
@@ -330,7 +424,7 @@ export function GenerateStatementDialog({
                   type="date"
                   required
                   value={periodStart}
-                  onChange={(e) => setPeriodStart(e.target.value)}
+                  onChange={(e) => setScope({ periodStart: e.target.value })}
                 />
               </div>
               <div className="space-y-1.5">
@@ -341,7 +435,7 @@ export function GenerateStatementDialog({
                   type="date"
                   required
                   value={periodEnd}
-                  onChange={(e) => setPeriodEnd(e.target.value)}
+                  onChange={(e) => setScope({ periodEnd: e.target.value })}
                 />
               </div>
             </div>
@@ -359,10 +453,18 @@ export function GenerateStatementDialog({
                   step="0.01"
                   required
                   placeholder="e.g. 20"
+                  value={draft.feePct}
+                  onChange={(e) => set({ feePct: e.target.value })}
                 />
               </div>
               <label className="flex items-center gap-2 self-end pb-2 text-sm">
-                <input type="checkbox" name="feeVat" defaultChecked className="size-4" />
+                <input
+                  type="checkbox"
+                  name="feeVat"
+                  checked={draft.feeVat}
+                  onChange={(e) => set({ feeVat: e.target.checked })}
+                  className="size-4"
+                />
                 Add VAT{vatRate ? ` (${Math.round(vatRate * 100)}%)` : ""} to the fee
               </label>
             </div>
@@ -373,6 +475,8 @@ export function GenerateStatementDialog({
               noun="Utility fee"
               placeholder="e.g. DEWA, Etisalat, gas"
               hint="Each one is listed on the owner's statement under its own name, with the expenses."
+              items={draft.utilities}
+              onItems={(update) => setDraft((d) => ({ ...d, utilities: update(d.utilities) }))}
             />
             <FeeItems
               name="otherCharges"
@@ -382,11 +486,19 @@ export function GenerateStatementDialog({
               hint="For our own figures only: never on the owner's statement and not taken off their payout. A % is of the booking income on the statement."
               allowPct
               income={income}
+              items={draft.others}
+              onItems={(update) => setDraft((d) => ({ ...d, others: update(d.others) }))}
             />
 
             <BookingDeductions
               key={`${ownerId}|${periodStart}|${periodEnd}`}
-              ownerId={ownerId} periodStart={periodStart} periodEnd={periodEnd} onIncome={setIncome} />
+              ownerId={ownerId}
+              periodStart={periodStart}
+              periodEnd={periodEnd}
+              onIncome={setIncome}
+              cuts={draft.cuts}
+              setCuts={(update) => setDraft((d) => ({ ...d, cuts: update(d.cuts) }))}
+            />
 
             <p className="text-xs text-[var(--muted-foreground)]">
               Net payout = rent after deductions − expenses − utility fees − management fee − VAT on the fee.
