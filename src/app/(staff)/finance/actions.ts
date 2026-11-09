@@ -107,8 +107,8 @@ export async function generateStatement(
   }
 
   const supabase = await createClient();
-  // Every ended stay's income must be in the ledger before the statement is cut.
-  const { error: postError } = await supabase.rpc("post_completed_bookings");
+  // Every stay's income in the period - those still to come in it too (0068) - must be in the ledger before the statement is cut.
+  const { error: postError } = await supabase.rpc("post_completed_bookings", { p_until: input.periodEnd });
   if (postError) return { error: postError.message };
   const { data, error } = await supabase.rpc("generate_owner_statement", {
     p_owner_id: input.ownerId,
@@ -428,7 +428,8 @@ export async function statementBookings(ownerId: string, periodStart: string, pe
   }
 
   const supabase = await createClient();
-  await supabase.rpc("post_completed_bookings");
+  // The period's stays still to come are listed too (0068).
+  await supabase.rpc("post_completed_bookings", { p_until: periodEnd });
   const { data } = await supabase
     .from("ledger_entries")
     .select(

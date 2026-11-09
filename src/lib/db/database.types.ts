@@ -5658,7 +5658,7 @@ export type Database = {
         Returns: boolean;
       };
       post_completed_bookings: {
-        Args: Record<string, unknown>;
+        Args: { p_until?: string };
         Returns: unknown;
       };
       raise_owner_ticket: {
