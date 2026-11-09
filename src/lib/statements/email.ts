@@ -71,7 +71,7 @@ export function buildStatementEmail(input: {
 <tr><td align="center" style="padding:32px 12px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
   <tr><td align="center" style="background:${NAVY};padding:28px 24px;">
-    <img src="${escape(portalUrl)}/logo-white.png" width="160" alt="D|R|P Dubai Rapid Properties" style="display:block;width:160px;max-width:60%;height:auto;border:0;">
+    <img src="${escape(portalUrl)}/statement-logo-white.png" width="160" alt="D|R|P Holiday Homes" style="display:block;width:160px;max-width:60%;height:auto;border:0;">
   </td></tr>
   <tr><td style="padding:32px 32px 28px;color:${INK};">
     <p style="margin:0 0 6px;font-size:13px;letter-spacing:1.5px;text-transform:uppercase;color:${GOLD};font-weight:600;">Owner statement</p>
