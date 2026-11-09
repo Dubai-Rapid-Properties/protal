@@ -94,7 +94,7 @@ export default async function OwnerTicketPage({
         <div className="space-y-5 lg:col-span-2">
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Photos</CardTitle>
+              <CardTitle className="text-base">Photos &amp; videos</CardTitle>
             </CardHeader>
             <CardContent>
               {/* The ticket was read under the owner's own access above */}
