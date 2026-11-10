@@ -4,6 +4,7 @@ import { addDays, dubaiToday, nightsBetween, rangesOverlap } from "@/lib/calenda
 import {
   matchBooking,
   matchUnit,
+  notesWithComment,
   parseBookingsSheet,
   samePrice,
   sheetCsvUrl,
@@ -87,7 +88,7 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
         const { data, error } = await client
           .from("bookings")
           .select(
-            "id, status, check_in, check_out, check_in_time, check_out_time, sheet_name, ical_uid, guests(full_name), nightly_rate_aed, accommodation_aed, cleaning_fee_aed, extra_fees_aed, tourism_dirham_aed, channel_commission_aed, gross_total_aed, payout_expected_aed"
+            "id, status, check_in, check_out, check_in_time, check_out_time, sheet_name, ical_uid, internal_notes, moved_from_unit_id, guests(full_name), nightly_rate_aed, accommodation_aed, cleaning_fee_aed, extra_fees_aed, tourism_dirham_aed, channel_commission_aed, gross_total_aed, payout_expected_aed"
           )
           .eq("unit_id", unitId)
           .gte("check_out", addDays(today, -60));
@@ -102,6 +103,8 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
             guestName: b.guests?.full_name ?? null,
             sheetName: b.sheet_name,
             icalUid: b.ical_uid,
+            notes: b.internal_notes,
+            movedFrom: b.moved_from_unit_id,
             checkInTime: b.check_in_time?.slice(0, 5) ?? null,
             checkOutTime: b.check_out_time?.slice(0, 5) ?? null,
             price: {
@@ -122,8 +125,9 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
 
     for (const row of parsed.rows) {
       if (row.checkOut < today) continue;
+      if (row.note?.unclear) problem(`${label(row)}: the comment ${row.note.unclear} ("${row.comments}").`);
       if (row.channel === null && !row.ownerStay) {
-        await applyAirbnbExtension(client, row, units, loadBookings, today, result);
+        await applyAirbnbRow(client, row, units, loadBookings, today, result);
         continue;
       }
 
@@ -198,6 +202,9 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
         // Times only when the sheet gives them: staff may have set them here.
         if (row.checkInTime && row.checkInTime !== match.checkInTime) changes.check_in_time = row.checkInTime;
         if (row.checkOutTime && row.checkOutTime !== match.checkOutTime) changes.check_out_time = row.checkOutTime;
+        // The sheet's comment, kept up to date in the booking's notes.
+        const notes = notesWithComment(match.notes ?? null, row.comments);
+        if (notes !== (match.notes ?? null)) changes.internal_notes = notes;
         // The sheet's nightly rate, over the stay's (new) nights.
         let price: StayPrice | null = null;
         if (row.nightlyRate && !changes.status && sheetMayPrice(match.price)) {
@@ -210,7 +217,7 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
         const meaningful = Boolean(
           changes.status || changes.check_in || changes.check_out || changes.check_in_time || changes.check_out_time || price
         );
-        if (!meaningful && !changes.sheet_name) continue;
+        if (!meaningful && !changes.sheet_name && changes.internal_notes === undefined) continue;
 
         const { error } = await client.from("bookings").update(changes).eq("id", match.id);
         if (error) {
@@ -225,6 +232,7 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
           checkInTime: changes.check_in_time ?? match.checkInTime,
           checkOutTime: changes.check_out_time ?? match.checkOutTime,
           price: price ?? match.price,
+          notes: changes.internal_notes === undefined ? match.notes : changes.internal_notes,
         });
         if (changes.status) result.cancelled++;
         else if (meaningful) result.updated++;
@@ -258,7 +266,7 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
           guest_count_known: false,
           guest_id: guest.id,
           sheet_name: sheetName(row.guest),
-          internal_notes: [`${SHEET_NOTE}.`, row.comments].filter(Boolean).join(" "),
+          internal_notes: notesWithComment(`${SHEET_NOTE}.`, row.comments),
           import_source: firstRead ? "bookings_sheet" : null,
         })
         .select("id")
@@ -311,14 +319,12 @@ export async function syncBookingsSheet(client: Client, idOrUrl: string): Promis
 async function applyAirbnbExtension(
   client: Client,
   row: SheetRow,
-  units: PortalUnit[],
+  unit: PortalUnit,
   loadBookings: (unitId: string) => Promise<PortalBooking[]>,
   today: string,
   result: SheetSyncResult
 ) {
   if (row.status === "cancelled" || row.status === "completed") return;
-  const unit = matchUnit(row, units);
-  if (!unit) return;
   const bookings = await loadBookings(unit.id);
   const live = (b: PortalBooking) => !["cancelled", "no_show"].includes(b.status);
   const key = `${sheetName(row.guest)} (extension)`;
@@ -330,7 +336,7 @@ async function applyAirbnbExtension(
    * extension) the stay with the same check-in or ending the day this row starts.
    */
   const first = (n: string | null) => (n ?? "").toLowerCase().match(/[\p{L}]+/u)?.[0] ?? "";
-  const said = row.extended || /extend|extension/i.test(row.comments);
+  const said = row.extended || row.note?.extends || /extend|extension/i.test(row.comments);
   const sameGuest = (b: PortalBooking) => first(row.guest).length >= 3 && first(row.guest) === first(b.guestName);
   const candidates = bookings.filter(
     (b) =>
@@ -404,12 +410,12 @@ async function applyAirbnbExtension(
       check_in: start,
       check_out: row.checkOut,
       check_out_time: row.checkOutTime,
-      ...(row.nightlyRate ? priceColumns(sheetPrice(row.nightlyRate, nightsBetween(start, row.checkOut))) : {}),
+      ...extensionPrice(row, nightsBetween(start, row.checkOut)),
       adults: 1,
       guest_count_known: false,
       guest_id: guestId,
       sheet_name: key,
-      internal_notes: [`${SHEET_NOTE}: extension of the Airbnb stay to ${row.checkOut}.`, row.comments].filter(Boolean).join(" "),
+      internal_notes: notesWithComment(`${SHEET_NOTE}: extension of the Airbnb stay to ${row.checkOut}.`, row.comments),
     })
     .select("id")
     .single();
@@ -430,6 +436,121 @@ async function applyAirbnbExtension(
     icalUid: null,
   });
   result.created++;
+}
+
+/**
+ * A row for a stay from the Airbnb account's calendar feed. The feed owns the
+ * stay's dates; the sheet adds what only the team knows:
+ *   - the guest was moved to another apartment ("Moved" columns, or "originally
+ *     booked in X shift to Y" / "moved to Y"): a stay not yet started moves to
+ *     that apartment, still following the original apartment's feed (0069);
+ *   - nights past the Airbnb stay paid directly (applyAirbnbExtension);
+ *   - the comment, and an arrival time ("arrived 3:15am"), on the stay.
+ */
+async function applyAirbnbRow(
+  client: Client,
+  row: SheetRow,
+  units: PortalUnit[],
+  loadBookings: (unitId: string) => Promise<PortalBooking[]>,
+  today: string,
+  result: SheetSyncResult
+) {
+  const problem = (text: string) => result.problems.push(`${label(row)}: ${text}`);
+  const target = row.movedApartment
+    ? matchUnit({ location: row.movedLocation || row.location, apartment: row.movedApartment }, units)
+    : null;
+  if (row.movedApartment && !target) {
+    if (row.status !== "cancelled" && row.status !== "completed") {
+      problem(`no unit in the portal matches the moved apartment ${row.movedLocation} ${row.movedApartment}.`);
+    }
+    return;
+  }
+  const booked = row.note?.bookedIn ? matchUnit(row.note.bookedIn, units) : row.movedApartment ? matchUnit(row, units) : null;
+  const unit = target ?? matchUnit(row, units);
+  if (!unit) return;
+
+  if (booked && booked.id !== unit.id && row.status !== "cancelled" && row.status !== "completed") {
+    await moveAirbnbStay(client, row, booked, unit, loadBookings, today, problem);
+  }
+  await applyAirbnbExtension(client, row, unit, loadBookings, today, result);
+
+  // The comment and arrival time on the Airbnb stay itself.
+  const bookings = await loadBookings(unit.id);
+  const stay = bookings.find(
+    (b) => b.icalUid && !["cancelled", "no_show"].includes(b.status) && rangesOverlap(b.checkIn, b.checkOut, row.checkIn, row.checkOut)
+  );
+  if (!stay) return;
+  const changes: Database["public"]["Tables"]["bookings"]["Update"] = {};
+  const notes = notesWithComment(stay.notes ?? null, row.comments);
+  if (notes !== (stay.notes ?? null)) changes.internal_notes = notes;
+  if (row.checkInTime && row.checkInTime !== stay.checkInTime && stay.checkIn === row.checkIn) changes.check_in_time = row.checkInTime;
+  if (row.checkOutTime && row.checkOutTime !== stay.checkOutTime) changes.check_out_time = row.checkOutTime;
+  if (!Object.keys(changes).length) return;
+  const { error } = await client.from("bookings").update(changes).eq("id", stay.id);
+  if (error) return problem(`the Airbnb stay's notes could not be saved - ${error.message}`);
+  Object.assign(stay, {
+    notes: changes.internal_notes === undefined ? stay.notes : changes.internal_notes,
+    checkInTime: changes.check_in_time ?? stay.checkInTime,
+    checkOutTime: changes.check_out_time ?? stay.checkOutTime,
+  });
+  if (changes.check_in_time || changes.check_out_time) result.updated++;
+}
+
+/**
+ * Moves an Airbnb stay to the apartment the guest was moved to. Only a stay
+ * that has not started: nights already spent in the first apartment are its
+ * owner's, so a stay under way is reported for the team to split by hand.
+ */
+async function moveAirbnbStay(
+  client: Client,
+  row: SheetRow,
+  from: PortalUnit,
+  to: PortalUnit,
+  loadBookings: (unitId: string) => Promise<PortalBooking[]>,
+  today: string,
+  problem: (text: string) => void
+) {
+  const live = (b: PortalBooking) => !["cancelled", "no_show", "checked_out"].includes(b.status);
+  const isStay = (b: PortalBooking) =>
+    Boolean(b.icalUid) && live(b) && (b.checkIn === row.checkIn || (b.checkIn >= row.checkIn && b.checkOut <= row.checkOut));
+  const there = await loadBookings(to.id);
+  if (there.some((b) => isStay(b) && b.movedFrom === from.id)) return; // moved already
+  const left = await loadBookings(from.id);
+  const stays = left.filter(isStay);
+  if (stays.length !== 1) {
+    if (!stays.length && !there.some(isStay)) problem(`moved to ${to.propertyName} ${to.unitNumber}, but no Airbnb stay for these dates is on ${from.propertyName} ${from.unitNumber}.`);
+    return;
+  }
+  const stay = stays[0];
+  if (stay.checkIn < today || stay.status === "checked_in") {
+    problem(
+      `moved to ${to.propertyName} ${to.unitNumber}, but the Airbnb stay on ${from.propertyName} ${from.unitNumber} has already started; move or split it by hand.`
+    );
+    return;
+  }
+  const notes = [stay.notes, `Moved from ${from.propertyName} ${from.unitNumber} (bookings sheet).`].filter(Boolean).join("\n");
+  const { error } = await client
+    .from("bookings")
+    .update({ unit_id: to.id, moved_from_unit_id: from.id, internal_notes: notes })
+    .eq("id", stay.id);
+  if (error) {
+    problem(`not moved to ${to.propertyName} ${to.unitNumber} - ${await explainClash(client, error, to.id, row)}`);
+    return;
+  }
+  left.splice(left.indexOf(stay), 1);
+  there.push({ ...stay, movedFrom: from.id, notes });
+}
+
+/**
+ * The extra nights' price: the sheet's nightly rate, else the comment's
+ * total for the extension ("Extension paid 6.5K").
+ */
+function extensionPrice(row: SheetRow, nights: number) {
+  if (row.nightlyRate) return priceColumns(sheetPrice(row.nightlyRate, nights));
+  const total = row.note?.extensionTotal;
+  if (!total || nights <= 0) return {};
+  const rate = Math.round((total / nights) * 100) / 100;
+  return priceColumns({ ...sheetPrice(rate, nights), accommodation: total, gross: total, payout: total });
 }
 
 /** A sheet price as the booking's columns. */

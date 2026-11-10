@@ -37,6 +37,79 @@ export interface SheetRow {
   movedLocation?: string;
   movedApartment?: string;
   comments: string;
+  /** What the comment says to do (readComment). */
+  note?: SheetComment;
+}
+
+/**
+ * What a row's comment asks for, as the team writes it:
+ *   "moved to Seven 1134", "to be moved to cloud 405", "shift to PT 3407"
+ *   "originally booked in cloud 2704 shift to Apex 1907"
+ *   "Extension paid 6.5K", "extn 3700aed", "Extended until Nov 20",
+ *   "paid one night through airbnb, rest will pay directly"
+ *   "paid via stripe", "arrived 3:15am"
+ * Anything else stays a note on the booking.
+ */
+export interface SheetComment {
+  /** Where the guest is moved to, when the "Moved" columns are empty. */
+  movedTo?: { location: string; apartment: string };
+  /** Where the stay was booked before the move. */
+  bookedIn?: { location: string; apartment: string };
+  /** AED for the extra nights of an extension. */
+  extensionTotal?: number;
+  /** The stay runs past what the channel holds (an extension, or nights paid directly). */
+  extends?: boolean;
+  /** How a direct guest paid: "Stripe", "cash"... */
+  paidVia?: string;
+  /** Arrival time, HH:MM. */
+  arrivedAt?: string;
+  /** Mentions a move the comment does not say where to. */
+  unclear?: string;
+}
+
+/** Short names the team uses for buildings. */
+const PLACE_ALIASES: Record<string, string> = { pt: "Palm Tower", st: "Sparkle Towers", dpt: "Damac Park Tower" };
+
+/** "Seven 1134", "cloud 405", "PT 3407", "Apex 1907/nov15-30" -> building and apartment. */
+function place(text: string): { location: string; apartment: string } | undefined {
+  const m = text.match(/^\s*(?:the\s+)?([a-z][a-z .'&-]*?)\s*#?\s*([a-z]?\d{2,5}[a-z]?)\b/i);
+  if (!m) return undefined;
+  const location = m[1].trim();
+  return { location: PLACE_ALIASES[location.toLowerCase()] ?? location, apartment: m[2] };
+}
+
+/** "6.5K" -> 6500, "3700aed" -> 3700, "3,700" -> 3700. */
+function amountOf(text: string): number | undefined {
+  const m = text.match(/(\d[\d,]*(?:\.\d+)?)\s*(k\b)?/i);
+  if (!m) return undefined;
+  const n = Number(m[1].replace(/,/g, "")) * (m[2] ? 1000 : 1);
+  return n > 0 && n < 1_000_000 ? Math.round(n * 100) / 100 : undefined;
+}
+
+export function readComment(comment: string): SheetComment {
+  const c = comment.replace(/\s+/g, " ").trim();
+  const out: SheetComment = {};
+  if (!c) return out;
+
+  const booked = c.match(/originally\s+booked\s+(?:in|at)\s+(.+?)(?:\s+(?:and\s+)?(?:shift|shifted|moved|move|transferred)\b|[,;]|$)/i);
+  if (booked) out.bookedIn = place(booked[1]);
+  const moved = c.match(/(?:moved|move|shift(?:ed)?|transferred|relocated)\s+to\s+(.+)$/i);
+  if (moved) out.movedTo = place(moved[1]);
+  if (/\b(moved|shift(ed)?|relocat)/i.test(c) && !out.movedTo) out.unclear = "mentions a move but not where to";
+
+  const ext = c.match(/\b(?:extension|extn|ext)\b\s*(?:paid|price|cost|of|for|=|:)?\s*(?:aed\s*)?(\d[\d,.]*\s*(?:k\b)?)/i);
+  if (ext) out.extensionTotal = amountOf(ext[1]);
+  if (/\b(extend|extension|extn)|rest\s+(?:will\s+)?pay|pay(?:ing|s)?\s+direct/i.test(c)) out.extends = true;
+
+  const paid = c.match(/\bpaid\s+(?:via|by|with|in|through)\s+(stripe|cash|card|bank\s*transfer|transfer|payment\s*link|link)\b/i);
+  if (paid) {
+    const how = paid[1].toLowerCase().replace(/\s+/g, " ");
+    out.paidVia = how === "stripe" ? "Stripe" : how.includes("link") ? "payment link" : how;
+  }
+
+  const arrived = c.match(/\barriv\w*\s+(?:at\s+)?(\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?)/i);
+  if (arrived) out.arrivedAt = parseSheetTime(arrived[1]) ?? undefined;
+  return out;
 }
 
 export interface SheetParseResult {
@@ -168,6 +241,10 @@ export function parseBookingsSheet(text: string): SheetParseResult {
     }
     const comments = cell(r, at.comments);
     const channel = channelOf(cell(r, at.source), comments);
+    const note = readComment(comments);
+    // The "Moved" columns win; a comment saying where the guest moved fills them in.
+    const movedApartment = cell(r, at.movedApartment) || note.movedTo?.apartment || "";
+    const movedLocation = cell(r, at.movedApartment) ? cell(r, at.movedLocation) : note.movedTo?.location ?? cell(r, at.movedLocation);
     rows.push({
       line,
       guest,
@@ -180,13 +257,14 @@ export function parseBookingsSheet(text: string): SheetParseResult {
       // "OWNER STAY" as the comment, on a stay not from the Airbnb account
       // (a comment merely mentioning an owner stay is not one).
       ownerStay: channel !== null && /^\s*owner'?s?\s*stay\b/i.test(comments),
-      checkInTime: parseSheetTime(cell(r, at.checkInTime)),
+      checkInTime: parseSheetTime(cell(r, at.checkInTime)) ?? note.arrivedAt ?? null,
       checkOutTime: parseSheetTime(cell(r, at.checkOutTime)),
       nightlyRate: parseSheetAmount(cell(r, at.rate)),
       extended: Boolean(booked && extended && extended > booked),
-      movedLocation: cell(r, at.movedLocation),
-      movedApartment: cell(r, at.movedApartment),
+      movedLocation,
+      movedApartment,
       comments,
+      note,
     });
   });
   return { rows, problems };
@@ -260,6 +338,10 @@ export interface PortalBooking {
   checkInTime?: string | null;
   checkOutTime?: string | null;
   price?: StayPrice;
+  /** The booking's internal notes, where the sheet's comment is kept. */
+  notes?: string | null;
+  /** The unit whose calendar feed a moved stay belongs to (0069). */
+  movedFrom?: string | null;
 }
 
 /** A booking's price columns, as AED. */
@@ -343,4 +425,22 @@ export function matchBooking(row: SheetRow, bookings: PortalBooking[]): PortalBo
     )
     .sort(byCloseness);
   return typed[0] ?? null;
+}
+
+/** The line in a booking's notes that carries the sheet's comment. */
+export const COMMENT_PREFIX = "Bookings sheet:";
+const CREATED_NOTE = "From the bookings sheet.";
+
+/**
+ * A booking's notes with the sheet's current comment on its own line, the
+ * comment before replaced. Staff's own notes stay as they are. Notes the sync
+ * wrote before this ("From the bookings sheet. <comment>") lose the old comment.
+ */
+export function notesWithComment(notes: string | null, comment: string): string | null {
+  const lines = (notes ?? "")
+    .split("\n")
+    .filter((l) => !l.startsWith(COMMENT_PREFIX))
+    .map((l) => (l.startsWith(CREATED_NOTE) ? CREATED_NOTE : l));
+  if (comment.trim()) lines.push(`${COMMENT_PREFIX} ${comment.trim()}`);
+  return lines.join("\n").trim() || null;
 }

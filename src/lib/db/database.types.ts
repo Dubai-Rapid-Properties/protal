@@ -264,6 +264,7 @@ export type Database = {
           check_in_alarm_done_by: string | null;
           prepare_alarm_done: number;
           prepare_alarm_done_by: string | null;
+          moved_from_unit_id: string | null;
         };
         Insert: {
           id?: string;
@@ -316,6 +317,7 @@ export type Database = {
           check_in_alarm_done_by?: string | null;
           prepare_alarm_done?: number;
           prepare_alarm_done_by?: string | null;
+          moved_from_unit_id?: string | null;
         };
         Update: {
           id?: string;
@@ -368,6 +370,7 @@ export type Database = {
           check_in_alarm_done_by?: string | null;
           prepare_alarm_done?: number;
           prepare_alarm_done_by?: string | null;
+          moved_from_unit_id?: string | null;
         };
         Relationships: [
           {

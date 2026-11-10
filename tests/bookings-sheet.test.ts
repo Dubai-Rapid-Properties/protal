@@ -205,3 +205,54 @@ test("moved guests: the moved columns are read, and never taken for the booked a
   assert.deepEqual([obad.location, obad.apartment], ["Cloud Tower by Tiger Properties", "2704"]);
   assert.deepEqual([obad.movedLocation, obad.movedApartment], ["Cloud Tower by Tiger Properties", "406"]);
 });
+
+test("comments the team writes on the sheet", async () => {
+  const { readComment } = await import("@/lib/sheet/bookings-sheet");
+  assert.deepEqual(readComment("Extension paid 6.5K"), { extensionTotal: 6500, extends: true });
+  assert.deepEqual(readComment("Extended until Nov 20"), { extends: true });
+  assert.deepEqual(readComment("arrived 3:15am"), { arrivedAt: "03:15" });
+  assert.deepEqual(readComment("paid one night through airbnb, rest will pay directly"), { extends: true });
+  assert.deepEqual(readComment("paid via stripe"), { paidVia: "Stripe" });
+  assert.deepEqual(readComment("moved to Seven 1134"), { movedTo: { location: "Seven", apartment: "1134" } });
+  assert.deepEqual(readComment("to be moved to cloud 405"), { movedTo: { location: "cloud", apartment: "405" } });
+  assert.deepEqual(readComment("originally booked in Apex 1907 shift to PT 3407"), {
+    bookedIn: { location: "Apex", apartment: "1907" },
+    movedTo: { location: "Palm Tower", apartment: "3407" },
+  });
+  assert.deepEqual(
+    readComment("originally booked in cloud 2704 shift to Apex 1907/nov15-30 extn 3700aed; extended same rate till Dec 9"),
+    {
+      bookedIn: { location: "cloud", apartment: "2704" },
+      movedTo: { location: "Apex", apartment: "1907" },
+      extensionTotal: 3700,
+      extends: true,
+    }
+  );
+  assert.deepEqual(readComment("Mr. Anton friend"), {});
+  assert.deepEqual(readComment("booking.com guest"), {});
+  assert.equal(readComment("guest shifted, ask Jasko").unclear, "mentions a move but not where to");
+});
+
+test("a comment fills in the move and the arrival time; the columns win", async () => {
+  const csv = `GUEST,Activity type,Check IN,Check OUT,Location,Apartment Number,Source,Moved Location,Moved Apartment Number,Comments
+A,Upcoming,13-Nov-2026,15-Nov-2026,Apex,1907,AIRBNB New,,,moved to Seven 1134
+B,Upcoming,23-Nov-2026,10-Dec-2026,Cloud Tower,2704,AIRBNB New,Cloud Tower,405,to be moved to cloud 406
+C,Upcoming,18-Sep-2026,31-Mar-2027,Churchill Tower,2407,Private Guest,,,arrived 3:15am
+`;
+  const [a, b, c] = parseBookingsSheet(csv).rows;
+  assert.deepEqual([a.movedLocation, a.movedApartment], ["Seven", "1134"]);
+  assert.deepEqual([b.movedLocation, b.movedApartment], ["Cloud Tower", "405"]);
+  assert.equal(c.checkInTime, "03:15");
+});
+
+test("the sheet's comment is kept on its own line in the booking's notes", async () => {
+  const { notesWithComment } = await import("@/lib/sheet/bookings-sheet");
+  assert.equal(notesWithComment("From the bookings sheet.", "paid via stripe"), "From the bookings sheet.\nBookings sheet: paid via stripe");
+  // An older note with the comment inline, and staff's own lines, which stay
+  assert.equal(
+    notesWithComment("From the bookings sheet. old comment\nCall before arrival", "new comment"),
+    "From the bookings sheet.\nCall before arrival\nBookings sheet: new comment"
+  );
+  assert.equal(notesWithComment("Bookings sheet: gone", ""), null);
+  assert.equal(notesWithComment(null, "Mr. Anton friend"), "Bookings sheet: Mr. Anton friend");
+});
