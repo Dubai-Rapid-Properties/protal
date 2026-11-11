@@ -1,7 +1,6 @@
 import { formatAED, formatPercent } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
 import type { Tables } from "@/lib/db/database.types";
-import { Logo } from "@/components/layout/logo";
 import { bookingFee, statementSummary, stayInPeriod } from "@/lib/statements/summary";
 
 type Statement = Tables<"owner_statements">;
@@ -79,7 +78,9 @@ export function StatementDocument({
       {/* Letterhead */}
       <header className="mb-8 flex items-start justify-between gap-6 border-b-2 border-[#C6A15B] pb-5">
         <div>
-          <Logo imageClassName="w-32" />
+          {/* Statements carry the holiday-home company's logo, as the PDF and email do */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- a fixed file, printed as it is */}
+          <img src="/statement-logo-black.png" alt="D|R|P Holiday Homes" width={1000} height={531} className="h-auto w-36" />
           <p className="mt-3 text-sm font-medium">
             {/* Owner statements are issued by the holiday-home company (0061) */}
             {company?.statement_legal_name || company?.legal_name || "DRP Holiday Homes LLC"}
