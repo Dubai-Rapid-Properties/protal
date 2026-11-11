@@ -17,8 +17,10 @@
 -- Same function as 0046_adopt_overlapping_stays.sql with those changes.
 -- ============================================================================
 
+-- No foreign key: a second link from bookings to units would make every
+-- "units(...)" embed on bookings ambiguous for the API (0070).
 alter table bookings
-  add column if not exists moved_from_unit_id uuid references units(id) on delete set null;
+  add column if not exists moved_from_unit_id uuid;
 
 comment on column bookings.moved_from_unit_id is
   'The unit whose calendar feed this stay belongs to, when the bookings sheet moved the guest to another unit (0069).';
