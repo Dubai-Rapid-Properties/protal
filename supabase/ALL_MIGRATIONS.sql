@@ -13257,8 +13257,10 @@ grant execute on function post_completed_bookings(date) to authenticated, servic
 -- Same function as 0046_adopt_overlapping_stays.sql with those changes.
 -- ============================================================================
 
+-- No foreign key: a second link from bookings to units would make every
+-- "units(...)" embed on bookings ambiguous for the API (0070).
 alter table bookings
-  add column if not exists moved_from_unit_id uuid references units(id) on delete set null;
+  add column if not exists moved_from_unit_id uuid;
 
 comment on column bookings.moved_from_unit_id is
   'The unit whose calendar feed this stay belongs to, when the bookings sheet moved the guest to another unit (0069).';
@@ -13578,3 +13580,21 @@ begin
   );
 end;
 $$;
+
+-- ####################################################################
+-- ## 0070_moved_from_no_fk.sql
+-- ####################################################################
+
+-- ============================================================================
+-- D|R|P PMS - 0070 bookings.moved_from_unit_id without a foreign key
+--
+-- 0069 made bookings.moved_from_unit_id reference units. That gave bookings
+-- two links to units, and the API could no longer tell which one a query's
+-- "units(...)" embed means: booking pages answered 404 and lists failed.
+-- The column stays (a plain unit id, set only by the bookings-sheet sync);
+-- the constraint goes, and the API reloads its view of the schema.
+-- ============================================================================
+
+alter table bookings drop constraint if exists bookings_moved_from_unit_id_fkey;
+
+notify pgrst, 'reload schema';
