@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { formatDateTime } from "@/lib/dates";
 import {
   Table,
   TableBody,
@@ -25,14 +26,14 @@ export const metadata = { title: "Owners" };
 export default async function OwnersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; show?: string }>;
+  searchParams: Promise<{ q?: string; show?: string; portal?: string }>;
 }) {
   const params = await searchParams;
   const supabase = await createClient();
 
   let query = supabase
     .from("owners")
-    .select("*, unit_ownerships(unit_id, ownership_pct, end_date), owner_users(profile_id)")
+    .select("*, unit_ownerships(unit_id, ownership_pct, end_date), owner_users(profile_id, profiles(last_login_at))")
     .eq("is_active", params.show !== "archived")
     .order("full_name");
 
@@ -43,11 +44,29 @@ export default async function OwnersPage({
   }
 
   const [profile, { data, error }] = await Promise.all([requireCapability("owners.view"), query]);
-  const owners = (data ?? []).map((owner) => ({
+  const all = (data ?? []).map((owner) => ({
     ...owner,
     unitCount: (owner.unit_ownerships ?? []).filter((o) => o.end_date === null).length,
     hasPortalAccess: (owner.owner_users ?? []).length > 0,
+    // The latest sign-in of any of the owner's portal logins.
+    lastLoginAt:
+      (owner.owner_users ?? [])
+        .map((u) => u.profiles?.last_login_at)
+        .filter((d): d is string => Boolean(d))
+        .sort()
+        .at(-1) ?? null,
   }));
+  const signedIn = all.filter((o) => o.lastLoginAt).length;
+  const invitedOnly = all.filter((o) => o.hasPortalAccess && !o.lastLoginAt).length;
+  // ?portal=signed-in: owners who have signed in, latest first; ?portal=not-signed-in: invited, never in.
+  const owners =
+    params.portal === "signed-in"
+      ? all.filter((o) => o.lastLoginAt).sort((a, b) => b.lastLoginAt!.localeCompare(a.lastLoginAt!))
+      : params.portal === "not-signed-in"
+        ? all.filter((o) => o.hasPortalAccess && !o.lastLoginAt)
+        : all;
+  const link = (portal?: string) =>
+    `/owners?${new URLSearchParams({ ...(params.q ? { q: params.q } : {}), ...(params.show ? { show: params.show } : {}), ...(portal ? { portal } : {}) })}`;
 
   const exportRows = owners.map((o) => ({
     Name: o.full_name,
@@ -59,6 +78,7 @@ export default async function OwnersPage({
     TRN: o.trn ?? "",
     Units: o.unitCount,
     "Portal access": o.hasPortalAccess ? "Yes" : "No",
+    "Last signed in": o.lastLoginAt ? o.lastLoginAt.slice(0, 10) : "",
   }));
 
   return (
@@ -102,7 +122,19 @@ export default async function OwnersPage({
               className="pl-8"
             />
             {params.show === "archived" && <input type="hidden" name="show" value="archived" />}
+            {params.portal && <input type="hidden" name="portal" value={params.portal} />}
           </form>
+          <div className="mt-3 flex flex-wrap gap-2 text-sm">
+            {[
+              { id: undefined, label: `All (${all.length})` },
+              { id: "signed-in", label: `Signed in to the portal (${signedIn})` },
+              { id: "not-signed-in", label: `Invited, not signed in yet (${invitedOnly})` },
+            ].map((f) => (
+              <Button key={f.label} asChild size="sm" variant={params.portal === f.id ? "default" : "outline"}>
+                <Link href={link(f.id)}>{f.label}</Link>
+              </Button>
+            ))}
+          </div>
         </CardContent>
       </Card>
 
@@ -162,8 +194,15 @@ export default async function OwnersPage({
                     {owner.unitCount}
                   </TableCell>
                   <TableCell className="text-right">
-                    {owner.hasPortalAccess ? (
-                      <Badge variant="success">Active</Badge>
+                    {owner.lastLoginAt ? (
+                      <>
+                        <Badge variant="success">Signed in</Badge>
+                        <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
+                          Last {formatDateTime(owner.lastLoginAt)}
+                        </p>
+                      </>
+                    ) : owner.hasPortalAccess ? (
+                      <Badge variant="warning">Not signed in yet</Badge>
                     ) : (
                       <Badge variant="muted">Not invited</Badge>
                     )}
