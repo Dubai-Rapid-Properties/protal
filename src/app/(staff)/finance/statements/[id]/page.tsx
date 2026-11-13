@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatementStatusBadge } from "@/components/domain/status-badge";
 import { StatementDocument } from "@/components/domain/statement-document";
 import { StatementActions } from "./statement-actions";
+import { GenerateStatementDialog, type Draft } from "../generate-dialog";
 import { canApproveStatements, canDeleteStatements } from "../../actions";
 import { formatDateTime } from "@/lib/dates";
 
@@ -61,6 +62,31 @@ export default async function StatementDetailPage({
   // Booking deductions (0061): the owner sees only the rent after them.
   const deducted = (lines ?? []).filter((l) => l.deduction_aed != null);
 
+  // A draft not waiting for the approver can be edited (0071): the dialog opens on its figures.
+  const editable = statement.status === "draft" && !statement.submitted_at && can(profile.role, "statements.issue");
+  const editDraft: Draft | null = editable
+    ? {
+        ownerId: statement.owner_id,
+        periodStart: statement.period_start,
+        periodEnd: statement.period_end,
+        feePct: statement.management_fee_pct != null ? String(Number(statement.management_fee_pct)) : "",
+        feeVat: statement.fee_vat_applied ?? true,
+        utilities: (lines ?? [])
+          .filter((l) => l.category_code === "EXP-OTHER-FEES" && !l.ledger_entry_id)
+          .map((l, key) => ({ key, description: l.description, amount: String(Number(l.amount_aed)), unit: "aed" as const })),
+        others: otherCharges.map((c, key) =>
+          c.pct != null
+            ? { key, description: c.description, amount: String(Number(c.pct)), unit: "pct" as const }
+            : { key, description: c.description, amount: String(Number(c.amount)), unit: "aed" as const }
+        ),
+        cuts: Object.fromEntries(
+          deducted
+            .filter((l) => l.ledger_entry_id)
+            .map((l) => [l.ledger_entry_id as string, { value: String(Number(l.deduction_aed)), unit: "aed" as const }])
+        ),
+      }
+    : null;
+
   return (
     <>
       <div className="no-print">
@@ -80,6 +106,15 @@ export default async function StatementDetailPage({
               canIssue={can(profile.role, "statements.issue")}
               canApprove={canApprove}
               canDelete={await canDeleteStatements(profile.email)}
+              editButton={
+                editDraft && statement.owners ? (
+                  <GenerateStatementDialog
+                    owners={[{ id: statement.owners.id, full_name: statement.owners.full_name }]}
+                    vatRate={settings?.vat_rate}
+                    edit={{ statementId: id, draft: editDraft }}
+                  />
+                ) : null
+              }
             />
           }
         />

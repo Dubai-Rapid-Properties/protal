@@ -5620,6 +5620,19 @@ export type Database = {
         };
         Returns: unknown;
       };
+      revise_owner_statement: {
+        Args: {
+          p_statement_id: string;
+          p_period_start: string;
+          p_period_end: string;
+          p_fee_pct?: number | null;
+          p_fee_vat?: boolean;
+          p_other_items?: Json;
+          p_other_charges?: Json;
+          p_booking_adjustments?: Json;
+        };
+        Returns: unknown;
+      };
       ical_export_events: {
         Args: Record<string, unknown>;
         Returns: unknown;

@@ -79,6 +79,25 @@ const statementSchema = z.object({
   ),
 });
 
+/** The figures finance enters, as generate_owner_statement and revise_owner_statement take them. */
+function statementArgs(input: z.infer<typeof statementSchema>) {
+  return {
+    p_period_start: input.periodStart,
+    p_period_end: input.periodEnd,
+    p_fee_pct: input.feePct,
+    p_fee_vat: input.feeVat === "on",
+    p_other_items: input.otherItems.map((i) => ({ description: i.description, amount: round2(i.amount) })),
+    p_other_charges: input.otherCharges.map((i) =>
+      i.pct !== undefined ? { description: i.description, pct: i.pct } : { description: i.description, amount: round2(i.amount ?? 0) }
+    ),
+    p_booking_adjustments: input.bookingAdjustments
+      .filter((a) => (a.pct ?? a.amount ?? 0) > 0)
+      .map((a) =>
+        a.pct !== undefined ? { ledger_entry_id: a.ledgerEntryId, pct: a.pct } : { ledger_entry_id: a.ledgerEntryId, amount: round2(a.amount ?? 0) }
+      ),
+  };
+}
+
 /**
  * Generates an owner statement for a period.
  *
@@ -112,19 +131,7 @@ export async function generateStatement(
   if (postError) return { error: postError.message };
   const { data, error } = await supabase.rpc("generate_owner_statement", {
     p_owner_id: input.ownerId,
-    p_period_start: input.periodStart,
-    p_period_end: input.periodEnd,
-    p_fee_pct: input.feePct,
-    p_fee_vat: input.feeVat === "on",
-    p_other_items: input.otherItems.map((i) => ({ description: i.description, amount: round2(i.amount) })),
-    p_other_charges: input.otherCharges.map((i) =>
-      i.pct !== undefined ? { description: i.description, pct: i.pct } : { description: i.description, amount: round2(i.amount ?? 0) }
-    ),
-    p_booking_adjustments: input.bookingAdjustments
-      .filter((a) => (a.pct ?? a.amount ?? 0) > 0)
-      .map((a) =>
-        a.pct !== undefined ? { ledger_entry_id: a.ledgerEntryId, pct: a.pct } : { ledger_entry_id: a.ledgerEntryId, amount: round2(a.amount ?? 0) }
-      ),
+    ...statementArgs(input),
   });
 
   if (error) {
@@ -133,6 +140,49 @@ export async function generateStatement(
         error:
           "A statement already covers this owner and period. Void the existing one before regenerating.",
       };
+    }
+    return { error: error.message };
+  }
+
+  revalidatePath("/finance/statements");
+  redirect(`/finance/statements/${data as string}`);
+}
+
+/**
+ * Changes a draft that is not waiting for the approver (0071): it is built
+ * again from the ledger with the new figures, and keeps its number.
+ */
+export async function reviseStatement(
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "statements.issue")) {
+    return { error: "Only finance and administrators may edit owner statements." };
+  }
+
+  const statementId = String(formData.get("statementId") ?? "");
+  if (!z.string().uuid().safeParse(statementId).success) return { error: "Statement not found." };
+  const parsed = statementSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Check the form." };
+  }
+  const input = parsed.data;
+  if (new Date(input.periodEnd) < new Date(input.periodStart)) {
+    return { error: "The period end cannot fall before the period start." };
+  }
+
+  const supabase = await createClient();
+  const { error: postError } = await supabase.rpc("post_completed_bookings", { p_until: input.periodEnd });
+  if (postError) return { error: postError.message };
+  const { data, error } = await supabase.rpc("revise_owner_statement", {
+    p_statement_id: statementId,
+    ...statementArgs(input),
+  });
+
+  if (error) {
+    if (error.message.includes("already exists")) {
+      return { error: "Another statement already covers this owner and period." };
     }
     return { error: error.message };
   }
@@ -419,13 +469,20 @@ export interface StatementBooking {
  * generate dialog to list with a deduction box each (0061): the bookings'
  * payouts not yet on a statement.
  */
-export async function statementBookings(ownerId: string, periodStart: string, periodEnd: string): Promise<StatementBooking[]> {
+export async function statementBookings(
+  ownerId: string,
+  periodStart: string,
+  periodEnd: string,
+  /** A draft being edited: its own bookings are listed too. */
+  statementId?: string
+): Promise<StatementBooking[]> {
   const profile = await requireProfile();
   if (!can(profile.role, "statements.issue")) return [];
   const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
   if (!z.string().uuid().safeParse(ownerId).success || !date.safeParse(periodStart).success || !date.safeParse(periodEnd).success) {
     return [];
   }
+  if (statementId !== undefined && !z.string().uuid().safeParse(statementId).success) return [];
 
   const supabase = await createClient();
   // The period's stays still to come are listed too (0068).
@@ -439,7 +496,7 @@ export async function statementBookings(ownerId: string, periodStart: string, pe
     .eq("direction", "income")
     .eq("is_owner_visible", true)
     .eq("gl_categories.affects_owner_statement", true)
-    .is("statement_id", null)
+    .or(statementId ? `statement_id.is.null,statement_id.eq.${statementId}` : "statement_id.is.null")
     .gte("entry_date", periodStart)
     .lte("entry_date", periodEnd)
     .order("entry_date");

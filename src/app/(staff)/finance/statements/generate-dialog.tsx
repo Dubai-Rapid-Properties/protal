@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
-import { FilePlus2, Plus, X } from "lucide-react";
+import { FilePlus2, Pencil, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,15 +18,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { generateStatement, statementBookings, type ActionState, type StatementBooking } from "../actions";
+import { generateStatement, reviseStatement, statementBookings, type ActionState, type StatementBooking } from "../actions";
 import { formatDate, statementPeriod } from "@/lib/dates";
 import { dubaiToday } from "@/lib/calendar";
 
-function Submit() {
+function Submit({ editing }: { editing: boolean }) {
   const { pending } = useFormStatus();
   return (
     <Button type="submit" disabled={pending}>
-      {pending ? "Generating…" : "Generate statement"}
+      {editing ? (pending ? "Saving…" : "Save changes") : pending ? "Generating…" : "Generate statement"}
     </Button>
   );
 }
@@ -45,11 +45,11 @@ function UnitSelect({ value, onChange, label }: { value: Unit; onChange: (u: Uni
 }
 
 type Unit = "aed" | "pct";
-type FeeItem = { key: number; description: string; amount: string; unit: Unit };
-type Cuts = Record<string, { value: string; unit: Unit }>;
+export type FeeItem = { key: number; description: string; amount: string; unit: Unit };
+export type Cuts = Record<string, { value: string; unit: Unit }>;
 
 /** Everything typed into the dialog, kept in this browser until the statement is made (a draft). */
-type Draft = {
+export type Draft = {
   ownerId: string;
   periodStart: string;
   periodEnd: string;
@@ -187,6 +187,7 @@ function BookingDeductions({
   ownerId,
   periodStart,
   periodEnd,
+  statementId,
   onIncome,
   cuts,
   setCuts,
@@ -194,6 +195,8 @@ function BookingDeductions({
   ownerId: string;
   periodStart: string;
   periodEnd: string;
+  /** The draft being edited: its own bookings are listed too. */
+  statementId?: string;
   onIncome: (income: number | null) => void;
   cuts: Cuts;
   setCuts: (update: (cuts: Cuts) => Cuts) => void;
@@ -204,13 +207,13 @@ function BookingDeductions({
     // Remounted (key) when the owner or period changes, so it starts empty.
     let live = true;
     if (!ownerId || !periodStart || !periodEnd || periodEnd < periodStart) return;
-    statementBookings(ownerId, periodStart, periodEnd).then((rows) => {
+    statementBookings(ownerId, periodStart, periodEnd, statementId).then((rows) => {
       if (live) setBookings(rows);
     });
     return () => {
       live = false;
     };
-  }, [ownerId, periodStart, periodEnd]);
+  }, [ownerId, periodStart, periodEnd, statementId]);
 
   const cutOf = (b: StatementBooking) => {
     const c = cuts[b.ledgerEntryId];
@@ -299,17 +302,21 @@ function BookingDeductions({
 export function GenerateStatementDialog({
   owners,
   vatRate,
+  edit,
 }: {
   owners: { id: string; full_name: string }[];
   /** company_settings.vat_rate, e.g. 0.05 */
   vatRate?: number | null;
+  /** A draft statement to change (0071): opened with its figures, for its owner only. */
+  edit?: { statementId: string; draft: Draft };
 }) {
   const [open, setOpen] = React.useState(false);
-  const [state, action] = useActionState<ActionState, FormData>(generateStatement, {});
+  const [state, action] = useActionState<ActionState, FormData>(edit ? reviseStatement : generateStatement, {});
+  const editing = !!edit;
 
   // Default to the period finance runs on the 15th: 16th to 15th.
   const { start, end } = statementPeriod(dubaiToday());
-  const blank: Draft = { ownerId: "", periodStart: start, periodEnd: end, feePct: "", feeVat: true, utilities: [], others: [], cuts: {} };
+  const blank: Draft = edit?.draft ?? { ownerId: "", periodStart: start, periodEnd: end, feePct: "", feeVat: true, utilities: [], others: [], cuts: {} };
   const [draft, setDraft] = React.useState<Draft>(blank);
   const [restored, setRestored] = React.useState(false);
   const [income, setIncome] = React.useState<number | null>(null);
@@ -318,7 +325,9 @@ export function GenerateStatementDialog({
 
   // The draft left from before (the dialog closed, the page reloaded), the first time the dialog opens.
   const onOpenChange = (next: boolean) => {
-    if (next && !loaded.current) {
+    // An edit always opens on the statement as it is.
+    if (next && editing) setDraft(blank);
+    if (next && !editing && !loaded.current) {
       loaded.current = true;
       const saved = readDraft();
       if (saved) {
@@ -329,18 +338,19 @@ export function GenerateStatementDialog({
     setOpen(next);
   };
   React.useEffect(() => {
-    if (!loaded.current || !saving.current) return;
+    if (editing || !loaded.current || !saving.current) return;
     try {
       window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
     } catch {
       /* Storage blocked: the dialog still keeps it while the page is open */
     }
-  }, [draft]);
+  }, [draft, editing]);
   React.useEffect(() => {
     if (!state.error) return;
     toast.error(state.error);
     // Not made: keep the draft for the next try.
     saving.current = true;
+    if (editing) return;
     try {
       window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
     } catch {}
@@ -362,10 +372,17 @@ export function GenerateStatementDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button>
-          <FilePlus2 className="size-4" />
-          Generate statement
-        </Button>
+        {editing ? (
+          <Button variant="outline">
+            <Pencil className="size-4" />
+            Edit
+          </Button>
+        ) : (
+          <Button>
+            <FilePlus2 className="size-4" />
+            Generate statement
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent
         className="max-h-[90dvh] overflow-y-auto sm:max-w-xl"
@@ -376,6 +393,7 @@ export function GenerateStatementDialog({
         <form
           action={action}
           onSubmit={() => {
+            if (editing) return;
             // Made (the page moves to the statement): the draft is done. An error saves it again.
             saving.current = false;
             try {
@@ -384,13 +402,14 @@ export function GenerateStatementDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Generate an owner statement</DialogTitle>
+            <DialogTitle>{editing ? "Edit the statement" : "Generate an owner statement"}</DialogTitle>
             <DialogDescription>
-              Collected income and owner-borne expenses for the period are pulled from
-              the ledger. The management fee is the % you set here, worked out on each
-              booking; utility fees are taken off item by item, each under its own name.
+              {editing
+                ? "The statement is built again from the ledger with what you set here, so bookings or expenses corrected since are picked up too. It keeps its number and stays a draft."
+                : "Collected income and owner-borne expenses for the period are pulled from the ledger. The management fee is the % you set here, worked out on each booking; utility fees are taken off item by item, each under its own name."}
             </DialogDescription>
           </DialogHeader>
+          {edit && <input type="hidden" name="statementId" value={edit.statementId} />}
 
           <div className="my-4 space-y-4">
             {restored && (
@@ -403,7 +422,14 @@ export function GenerateStatementDialog({
             )}
             <div className="space-y-1.5">
               <Label htmlFor="ownerId">Owner</Label>
-              <Select id="ownerId" name="ownerId" required value={ownerId} onChange={(e) => setScope({ ownerId: e.target.value })}>
+              <Select
+                id="ownerId"
+                name="ownerId"
+                required
+                disabled={editing}
+                value={ownerId}
+                onChange={(e) => setScope({ ownerId: e.target.value })}
+              >
                 <option value="" disabled>
                   Select an owner
                 </option>
@@ -413,6 +439,8 @@ export function GenerateStatementDialog({
                   </option>
                 ))}
               </Select>
+              {/* A disabled field is not sent */}
+              {editing && <input type="hidden" name="ownerId" value={ownerId} />}
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -495,6 +523,7 @@ export function GenerateStatementDialog({
               ownerId={ownerId}
               periodStart={periodStart}
               periodEnd={periodEnd}
+              statementId={edit?.statementId}
               onIncome={setIncome}
               cuts={draft.cuts}
               setCuts={(update) => setDraft((d) => ({ ...d, cuts: update(d.cuts) }))}
@@ -508,7 +537,7 @@ export function GenerateStatementDialog({
           </div>
 
           <DialogFooter>
-            <Submit />
+            <Submit editing={editing} />
           </DialogFooter>
         </form>
       </DialogContent>
