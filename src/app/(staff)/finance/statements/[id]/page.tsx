@@ -74,6 +74,10 @@ export default async function StatementDetailPage({
         utilities: (lines ?? [])
           .filter((l) => l.category_code === "EXP-OTHER-FEES" && !l.ledger_entry_id)
           .map((l, key) => ({ key, description: l.description, amount: String(Number(l.amount_aed)), unit: "aed" as const })),
+        // Entered on the statement (no ledger line), on its Maintenance row (0072).
+        maintenance: (lines ?? [])
+          .filter((l) => l.category_code === "EXP-MAINT" && !l.ledger_entry_id)
+          .map((l, key) => ({ key, description: l.description, amount: String(Number(l.amount_aed)), unit: "aed" as const })),
         others: otherCharges.map((c, key) =>
           c.pct != null
             ? { key, description: c.description, amount: String(Number(c.pct)), unit: "pct" as const }
@@ -82,7 +86,10 @@ export default async function StatementDetailPage({
         cuts: Object.fromEntries(
           deducted
             .filter((l) => l.ledger_entry_id)
-            .map((l) => [l.ledger_entry_id as string, { value: String(Number(l.deduction_aed)), unit: "aed" as const }])
+            .map((l) => [
+              l.ledger_entry_id as string,
+              { value: String(Math.abs(Number(l.deduction_aed))), unit: "aed" as const, add: Number(l.deduction_aed) < 0 },
+            ])
         ),
       }
     : null;
@@ -170,9 +177,9 @@ export default async function StatementDetailPage({
         {deducted.length > 0 && (
           <Card className="mb-5">
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Booking deductions</CardTitle>
+              <CardTitle className="text-base">Booking adjustments</CardTitle>
               <p className="text-xs text-[var(--muted-foreground)]">
-                Staff only. Taken off these bookings&apos; rent; the owner&apos;s statement shows the rent after them.
+                Staff only. Taken off (or added to) these bookings&apos; rent; the owner&apos;s statement shows the rent after them.
               </p>
             </CardHeader>
             <CardContent>
@@ -181,7 +188,8 @@ export default async function StatementDetailPage({
                   <li key={l.id} className="flex flex-wrap justify-between gap-x-4">
                     <span>{l.guest_name || l.description}</span>
                     <span className="tabular-nums text-[var(--muted-foreground)]">
-                      <Money amount={l.original_amount_aed} /> − <Money amount={l.deduction_aed} /> ={" "}
+                      <Money amount={l.original_amount_aed} /> {Number(l.deduction_aed) < 0 ? "+" : "−"}{" "}
+                      <Money amount={Math.abs(Number(l.deduction_aed))} /> ={" "}
                       <span className="font-medium text-[var(--foreground)]">
                         <Money amount={l.amount_aed} />
                       </span>
@@ -189,7 +197,7 @@ export default async function StatementDetailPage({
                   </li>
                 ))}
                 <li className="flex justify-between gap-4 border-t border-[var(--border)] pt-1 font-medium">
-                  <span>Total deducted</span>
+                  <span>Total adjustment (− off, + on)</span>
                   <Money amount={deducted.reduce((sum, l) => sum + Number(l.deduction_aed), 0)} />
                 </li>
               </ul>

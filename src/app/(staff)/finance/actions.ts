@@ -47,8 +47,9 @@ const feeItems = (what: string) =>
 const amountOrPct = (what: string) =>
   z
     .object({
-      amount: z.number().min(0, `${what} cannot be negative`).max(10_000_000).optional(),
-      pct: z.number().min(0, `${what} cannot be negative`).max(100, `${what} cannot be over 100%`).optional(),
+      // Negative: added to the rent instead of taken off it (0072).
+      amount: z.number().min(-10_000_000).max(10_000_000).optional(),
+      pct: z.number().min(-1000).max(100, `${what} cannot be over 100%`).optional(),
     })
     .refine((v) => (v.amount === undefined) !== (v.pct === undefined), `Give each ${what.toLowerCase()} an amount or a %`);
 
@@ -64,6 +65,8 @@ const statementSchema = z.object({
   feeVat: z.literal("on").optional(),
   // Utility fees (0055): each listed for the owner under its own name.
   otherItems: feeItems("utility fee"),
+  // Maintenance fees entered on the statement (0072), on its Maintenance row.
+  maintenanceItems: feeItems("maintenance fee"),
   // Other fees (0056, 0057): kept for staff; never on the owner's statement, not deducted.
   // An amount, or a % of the statement's booking income (0061).
   otherCharges: jsonList(
@@ -86,12 +89,15 @@ function statementArgs(input: z.infer<typeof statementSchema>) {
     p_period_end: input.periodEnd,
     p_fee_pct: input.feePct,
     p_fee_vat: input.feeVat === "on",
-    p_other_items: input.otherItems.map((i) => ({ description: i.description, amount: round2(i.amount) })),
+    p_other_items: [
+      ...input.otherItems.map((i) => ({ description: i.description, amount: round2(i.amount) })),
+      ...input.maintenanceItems.map((i) => ({ description: i.description, amount: round2(i.amount), kind: "maintenance" })),
+    ],
     p_other_charges: input.otherCharges.map((i) =>
       i.pct !== undefined ? { description: i.description, pct: i.pct } : { description: i.description, amount: round2(i.amount ?? 0) }
     ),
     p_booking_adjustments: input.bookingAdjustments
-      .filter((a) => (a.pct ?? a.amount ?? 0) > 0)
+      .filter((a) => (a.pct ?? a.amount ?? 0) !== 0)
       .map((a) =>
         a.pct !== undefined ? { ledger_entry_id: a.ledgerEntryId, pct: a.pct } : { ledger_entry_id: a.ledgerEntryId, amount: round2(a.amount ?? 0) }
       ),

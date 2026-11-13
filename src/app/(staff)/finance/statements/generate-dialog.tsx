@@ -46,7 +46,8 @@ function UnitSelect({ value, onChange, label }: { value: Unit; onChange: (u: Uni
 
 type Unit = "aed" | "pct";
 export type FeeItem = { key: number; description: string; amount: string; unit: Unit };
-export type Cuts = Record<string, { value: string; unit: Unit }>;
+/** Each booking's adjustment: taken off its rent, or with `add`, added to it (0072). */
+export type Cuts = Record<string, { value: string; unit: Unit; add?: boolean }>;
 
 /** Everything typed into the dialog, kept in this browser until the statement is made (a draft). */
 export type Draft = {
@@ -56,6 +57,8 @@ export type Draft = {
   feePct: string;
   feeVat: boolean;
   utilities: FeeItem[];
+  /** Maintenance fees (0072), on the statement's Maintenance row; missing in drafts saved before */
+  maintenance?: FeeItem[];
   others: FeeItem[];
   cuts: Cuts;
 };
@@ -217,7 +220,7 @@ function BookingDeductions({
 
   const cutOf = (b: StatementBooking) => {
     const c = cuts[b.ledgerEntryId];
-    const v = Number(c?.value) || 0;
+    const v = (Number(c?.value) || 0) * (c?.add ? -1 : 1);
     return c?.unit === "pct" ? Math.round(b.amount * v) / 100 : v;
   };
   const income = bookings ? bookings.reduce((sum, b) => sum + b.amount - cutOf(b), 0) : null;
@@ -225,11 +228,11 @@ function BookingDeductions({
 
   const payload = (bookings ?? [])
     .filter((b) => Number(cuts[b.ledgerEntryId]?.value) > 0)
-    .map((b) =>
-      cuts[b.ledgerEntryId].unit === "pct"
-        ? { ledgerEntryId: b.ledgerEntryId, pct: Number(cuts[b.ledgerEntryId].value) }
-        : { ledgerEntryId: b.ledgerEntryId, amount: Number(cuts[b.ledgerEntryId].value) }
-    );
+    .map((b) => {
+      const c = cuts[b.ledgerEntryId];
+      const v = Number(c.value) * (c.add ? -1 : 1);
+      return c.unit === "pct" ? { ledgerEntryId: b.ledgerEntryId, pct: v } : { ledgerEntryId: b.ledgerEntryId, amount: v };
+    });
 
   return (
     <div className="space-y-2">
@@ -260,14 +263,22 @@ function BookingDeductions({
                     .join(" · ")}
                 </p>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--muted-foreground)]">Deduct</span>
+                  <Select
+                    aria-label={`${b.guest}: deduct from or add to the rent`}
+                    className="h-8 w-24 shrink-0"
+                    value={cut.add ? "add" : "deduct"}
+                    onChange={(e) => setCuts((c) => ({ ...c, [b.ledgerEntryId]: { ...cut, add: e.target.value === "add" } }))}
+                  >
+                    <option value="deduct">Deduct</option>
+                    <option value="add">Add</option>
+                  </Select>
                   <Input
-                    aria-label={`Deduction from ${b.guest}`}
+                    aria-label={cut.add ? `Added to ${b.guest}'s rent` : `Deduction from ${b.guest}`}
                     placeholder="0"
                     type="number"
                     inputMode="decimal"
                     min={0}
-                    max={cut.unit === "pct" ? 100 : b.amount}
+                    max={cut.add ? undefined : cut.unit === "pct" ? 100 : b.amount}
                     step="0.01"
                     className="h-8 w-24"
                     value={cut.value}
@@ -292,8 +303,9 @@ function BookingDeductions({
         </div>
       )}
       <p className="text-xs text-[var(--muted-foreground)]">
-        What you deduct is taken off that booking&apos;s rent. The owner&apos;s statement shows only the rent after it,
-        and the management fee is worked out on that.
+        What you deduct is taken off that booking&apos;s rent; what you add goes on it (e.g. an Airbnb stay whose
+        price came in for one night only). The owner&apos;s statement shows only the rent after it, and the
+        management fee is worked out on that.
       </p>
     </div>
   );
@@ -316,7 +328,7 @@ export function GenerateStatementDialog({
 
   // Default to the period finance runs on the 15th: 16th to 15th.
   const { start, end } = statementPeriod(dubaiToday());
-  const blank: Draft = edit?.draft ?? { ownerId: "", periodStart: start, periodEnd: end, feePct: "", feeVat: true, utilities: [], others: [], cuts: {} };
+  const blank: Draft = edit?.draft ?? { ownerId: "", periodStart: start, periodEnd: end, feePct: "", feeVat: true, utilities: [], maintenance: [], others: [], cuts: {} };
   const [draft, setDraft] = React.useState<Draft>(blank);
   const [restored, setRestored] = React.useState(false);
   const [income, setIncome] = React.useState<number | null>(null);
@@ -507,6 +519,15 @@ export function GenerateStatementDialog({
               onItems={(update) => setDraft((d) => ({ ...d, utilities: update(d.utilities) }))}
             />
             <FeeItems
+              name="maintenanceItems"
+              label="Maintenance fees"
+              noun="Maintenance fee"
+              placeholder="e.g. AC service, plumbing"
+              hint="Each one is listed on the owner's statement under its own name, on the Maintenance row after Utilities."
+              items={draft.maintenance ?? []}
+              onItems={(update) => setDraft((d) => ({ ...d, maintenance: update(d.maintenance ?? []) }))}
+            />
+            <FeeItems
               name="otherCharges"
               label="Other fees"
               noun="Other fee"
@@ -530,7 +551,7 @@ export function GenerateStatementDialog({
             />
 
             <p className="text-xs text-[var(--muted-foreground)]">
-              Net payout = rent after deductions − expenses − utility fees − management fee − VAT on the fee.
+              Net payout = rent after adjustments − expenses − utility fees − maintenance fees − management fee − VAT on the fee.
               Ledger lines already carried on another statement are skipped, so the same
               income can never be paid out twice.
             </p>
