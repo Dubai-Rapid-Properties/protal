@@ -77,3 +77,14 @@ export function statementSummary<L extends SummaryLine>(statement: SummaryStatem
     deducted: deducted >= 0.01 ? deducted : 0,
   };
 }
+
+/** The properties a statement is for ("Zumurud Tower - 309"), from its lines' units, in order of appearance. */
+export function statementProperties(lines: { unit_label?: string | null }[]): string[] {
+  const seen: string[] = [];
+  for (const l of lines) {
+    const label = l.unit_label?.trim();
+    // "Portfolio": fees entered on the statement, on no one unit.
+    if (label && label !== "Portfolio" && !seen.includes(label)) seen.push(label);
+  }
+  return seen;
+}

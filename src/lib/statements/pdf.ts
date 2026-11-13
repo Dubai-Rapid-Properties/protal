@@ -9,7 +9,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type RGB }
 import { formatAED } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
 import { LOGO_BLACK_PNG_BASE64 } from "./logo-png";
-import { bookingFee, statementSummary, stayInPeriod } from "./summary";
+import { bookingFee, statementProperties, statementSummary, stayInPeriod } from "./summary";
 import type { EmailLine, EmailStatement } from "./email";
 
 export interface PdfCompany {
@@ -111,6 +111,11 @@ export async function buildStatementPdf(input: {
   draw("STATEMENT FOR", M, y, { size: 7.5, f: bold, color: MUTED });
   y -= 15;
   draw(owner.full_name, M, y, { size: 11, f: bold });
+  const properties = statementProperties(lines);
+  if (properties.length) {
+    y -= 13;
+    draw(`${properties.length === 1 ? "Property" : "Properties"}: ${properties.join(", ")}`, M, y, { size: 9.5, f: bold });
+  }
   for (const l of [owner.address_line, [owner.email, owner.phone].filter(Boolean).join(" · "), owner.trn && `TRN ${owner.trn}`]) {
     if (!l) continue;
     y -= 12;

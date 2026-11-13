@@ -1,7 +1,7 @@
 import { formatAED, formatPercent } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
 import type { Tables } from "@/lib/db/database.types";
-import { bookingFee, statementSummary, stayInPeriod } from "@/lib/statements/summary";
+import { bookingFee, statementProperties, statementSummary, stayInPeriod } from "@/lib/statements/summary";
 
 type Statement = Tables<"owner_statements">;
 type Line = Tables<"owner_statement_lines">;
@@ -54,6 +54,7 @@ export function StatementDocument({
     .filter(Boolean)
     .join(" + ");
 
+  const properties = statementProperties(lines);
   const unitCount = new Set(lines.filter((l) => l.unit_id).map((l) => l.unit_id)).size;
 
   // Group income by unit so a multi-property owner can see each unit's
@@ -129,6 +130,11 @@ export function StatementDocument({
           Statement for
         </p>
         <p className="mt-1 font-medium">{owner?.full_name}</p>
+        {properties.length > 0 && (
+          <p className="text-sm text-neutral-800">
+            {properties.length === 1 ? "Property" : "Properties"}: {properties.join(", ")}
+          </p>
+        )}
         {owner?.address_line && (
           <p className="text-sm text-neutral-600">{owner.address_line}</p>
         )}
