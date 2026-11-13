@@ -30,6 +30,7 @@ export function StatementActions({
   canIssue,
   canApprove,
   canDelete = false,
+  editButton,
 }: {
   statementId: string;
   status: Enums<"statement_status">;
@@ -40,6 +41,8 @@ export function StatementActions({
   canApprove: boolean;
   /** dulshan@dubairapidproperties.com only (0054). */
   canDelete?: boolean;
+  /** Edit, on a draft not waiting for the approver (0071). */
+  editButton?: React.ReactNode;
 }) {
   const [deleting, startDelete] = React.useTransition();
   const [working, startWork] = React.useTransition();
@@ -66,6 +69,8 @@ export function StatementActions({
         <Printer className="size-4" />
         Print / save PDF
       </Button>
+
+      {editButton}
 
       {canIssue && status === "draft" && !submitted && (
         <Button disabled={working} onClick={() => run(() => submitStatement(statementId))}>
