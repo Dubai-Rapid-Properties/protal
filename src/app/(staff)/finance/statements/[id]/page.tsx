@@ -103,12 +103,15 @@ export default async function StatementDetailPage({
                   add: base < 0,
                   cleaning: named("Cleaning fee") ? String(Number(named("Cleaning fee")!.amount)) : "",
                   guest: named("Guest fee") ? String(Number(named("Guest fee")!.amount)) : "",
-                  // Every other fee on the booking, as one amount.
-                  other: (() => {
-                    const sum = fees
-                      .filter((f) => f.description !== "Cleaning fee" && f.description !== "Guest fee")
-                      .reduce((total, f) => total + Number(f.amount), 0);
-                    return sum > 0 ? String(Math.round(sum * 100) / 100) : "";
+                  // Every other fee on the booking, as one amount, with its name(s).
+                  ...(() => {
+                    const others = fees.filter((f) => f.description !== "Cleaning fee" && f.description !== "Guest fee");
+                    const sum = others.reduce((total, f) => total + Number(f.amount), 0);
+                    const names = others.map((f) => f.description).filter((d) => d !== "Other fees");
+                    return {
+                      other: sum > 0 ? String(Math.round(sum * 100) / 100) : "",
+                      otherName: [...new Set(names)].join(", "),
+                    };
                   })(),
                   ...(entered && (entered.rent != null || entered.check_in)
                     ? {
