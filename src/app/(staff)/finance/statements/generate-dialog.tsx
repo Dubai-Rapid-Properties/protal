@@ -223,7 +223,8 @@ function FeeItems({
 /**
  * The bookings the statement will carry, each with a deduction - an amount or
  * a % of its rent (0061). The statement shows the rent after it. Sent as JSON
- * in bookingAdjustments; reports the income after deductions to `onIncome`.
+ * in bookingAdjustments; reports the rent before the other fees to `onIncome`,
+ * for the other fees given as a %.
  */
 function BookingDeductions({
   ownerId,
@@ -282,7 +283,11 @@ function BookingDeductions({
   const weights = list.map((b) => Math.max(0, b.amount - ownCutOf(b)));
   const weightTotal = weights.reduce((sum, w) => sum + w, 0);
   for (const fee of others) {
-    const total = Math.round((Number(fee.amount) || 0) * 100);
+    // A %: of the bookings' rent before the other fees, as before (0061).
+    const total =
+      fee.unit === "pct"
+        ? Math.round(weightTotal * (Number(fee.amount) || 0))
+        : Math.round((Number(fee.amount) || 0) * 100);
     if (total <= 0 || list.length === 0) continue;
     let left = total;
     list.forEach((b, i) => {
@@ -299,7 +304,8 @@ function BookingDeductions({
   /** Everything taken off the ledger's amount, the other fees' share too. */
   const cutOf = (b: StatementBooking) => ownCutOf(b) + shareOf(b);
   const income = bookings ? bookings.reduce((sum, b) => sum + b.amount - cutOf(b), 0) : null;
-  React.useEffect(() => onIncome(income), [income, onIncome]);
+  const before = bookings ? weightTotal : null;
+  React.useEffect(() => onIncome(before), [before, onIncome]);
 
   const payload = (bookings ?? [])
     .filter(
@@ -525,7 +531,7 @@ export function GenerateStatementDialog({
   const blank: Draft = edit?.draft ?? { ownerId: "", periodStart: start, periodEnd: end, feePct: "", feeVat: true, utilities: [], maintenance: [], others: [], cuts: {} };
   const [draft, setDraft] = React.useState<Draft>(blank);
   const [restored, setRestored] = React.useState(false);
-  const [, setIncome] = React.useState<number | null>(null);
+  const [income, setIncome] = React.useState<number | null>(null);
   const loaded = React.useRef(false);
   const saving = React.useRef(true);
 
@@ -752,7 +758,9 @@ export function GenerateStatementDialog({
               label="Other fees"
               noun="Other fee"
               placeholder="e.g. DTCM, Cleaning Airbnb Fee"
-              hint="Taken off the bookings' rent below, split between them by their rent. The owner sees only the rent after them, never these names."
+              hint="Taken off the bookings' rent below at once, split between them by their rent. The owner sees only the rent after them, never these names. A % is of the bookings' rent."
+              allowPct
+              income={income}
               items={draft.others}
               onItems={(update) => setDraft((d) => ({ ...d, others: update(d.others) }))}
             />
