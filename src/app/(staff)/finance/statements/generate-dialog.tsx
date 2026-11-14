@@ -52,8 +52,30 @@ export type BookingFee = { key: number; description: string; amount: string };
  * Each booking's adjustment: taken off its rent, or with `add`, added to it
  * (0072); and its own fees - cleaning, guest fee, others - taken off with it (0073).
  */
-export type Cut = { value: string; unit: Unit; add?: boolean; cleaning?: string; guest?: string; fees?: BookingFee[] };
+export type Cut = {
+  value: string;
+  unit: Unit;
+  add?: boolean;
+  cleaning?: string;
+  guest?: string;
+  fees?: BookingFee[];
+  /** The rent and dates set by hand (0075), in place of the ledger's. */
+  manual?: boolean;
+  rent?: string;
+  checkIn?: string;
+  checkOut?: string;
+};
 export type Cuts = Record<string, Cut>;
+
+/** yyyy-mm-dd plus some days. */
+const addDays = (date: string, days: number) => {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+/** Nights between two yyyy-mm-dd dates. */
+const nightsFrom = (checkIn: string, checkOut: string) =>
+  Math.round((Date.parse(`${checkOut}T00:00:00Z`) - Date.parse(`${checkIn}T00:00:00Z`)) / 86_400_000);
 
 /** The booking's own fees, named, as the statement keeps them. */
 const feesOf = (c: Cut | undefined) =>
@@ -61,13 +83,14 @@ const feesOf = (c: Cut | undefined) =>
     ? [
         { description: "Cleaning fee", amount: Number(c.cleaning) || 0 },
         { description: "Guest fee", amount: Number(c.guest) || 0 },
-        ...(c.fees ?? []).map((f) => ({ description: f.description.trim(), amount: Number(f.amount) || 0 })),
       ].filter((f) => f.amount > 0)
     : [];
 
 /** Everything typed into the dialog, kept in this browser until the statement is made (a draft). */
 export type Draft = {
   ownerId: string;
+  /** One of the owner's units only (0075); empty for all of them. Missing in drafts saved before. */
+  unitId?: string;
   periodStart: string;
   periodEnd: string;
   feePct: string;
@@ -207,11 +230,15 @@ function BookingDeductions({
   periodStart,
   periodEnd,
   statementId,
+  unitId,
   onIncome,
   cuts,
   setCuts,
+  others,
 }: {
   ownerId: string;
+  /** One of the owner's units only (0075). */
+  unitId?: string;
   periodStart: string;
   periodEnd: string;
   /** The draft being edited: its own bookings are listed too. */
@@ -219,6 +246,8 @@ function BookingDeductions({
   onIncome: (income: number | null) => void;
   cuts: Cuts;
   setCuts: (update: (cuts: Cuts) => Cuts) => void;
+  /** Other fees for the whole statement, taken off the bookings' rent, split by rent. */
+  others: FeeItem[];
 }) {
   const [bookings, setBookings] = React.useState<StatementBooking[] | null>(null);
 
@@ -226,35 +255,75 @@ function BookingDeductions({
     // Remounted (key) when the owner or period changes, so it starts empty.
     let live = true;
     if (!ownerId || !periodStart || !periodEnd || periodEnd < periodStart) return;
-    statementBookings(ownerId, periodStart, periodEnd, statementId).then((rows) => {
+    statementBookings(ownerId, periodStart, periodEnd, statementId, unitId || undefined).then((rows) => {
       if (live) setBookings(rows);
     });
     return () => {
       live = false;
     };
-  }, [ownerId, periodStart, periodEnd, statementId]);
+  }, [ownerId, periodStart, periodEnd, statementId, unitId]);
 
-  /** Everything taken off the booking's rent: its adjustment and its own fees. */
-  const cutOf = (b: StatementBooking) => {
+  /** The rent before the adjustment: set by hand (0075), else the ledger's. */
+  const rentOf = (b: StatementBooking) => {
     const c = cuts[b.ledgerEntryId];
-    const v = (Number(c?.value) || 0) * (c?.add ? -1 : 1);
-    const base = c?.unit === "pct" ? Math.round(b.amount * v) / 100 : v;
-    return base + feesOf(c).reduce((sum, f) => sum + f.amount, 0);
+    return c?.manual && c.rent !== undefined && c.rent !== "" && Number(c.rent) >= 0 ? Number(c.rent) : b.amount;
   };
+  /** Taken off the ledger's amount by the booking itself: the rent set by hand, the adjustment, its cleaning and guest fees. */
+  const ownCutOf = (b: StatementBooking) => {
+    const c = cuts[b.ledgerEntryId];
+    const rent = rentOf(b);
+    const v = (Number(c?.value) || 0) * (c?.add ? -1 : 1);
+    const adjust = c?.unit === "pct" ? Math.round(rent * v) / 100 : v;
+    return b.amount - rent + adjust + feesOf(c).reduce((sum, f) => sum + f.amount, 0);
+  };
+  // The statement's other fees, each split over the bookings by their rent; the last takes the cents left.
+  const shares = new Map<string, { description: string; amount: number }[]>();
+  const list = bookings ?? [];
+  const weights = list.map((b) => Math.max(0, b.amount - ownCutOf(b)));
+  const weightTotal = weights.reduce((sum, w) => sum + w, 0);
+  for (const fee of others) {
+    const total = Math.round((Number(fee.amount) || 0) * 100);
+    if (total <= 0 || list.length === 0) continue;
+    let left = total;
+    list.forEach((b, i) => {
+      const last = i === list.length - 1;
+      const cents = last ? left : weightTotal > 0 ? Math.round((total * weights[i]) / weightTotal) : i === 0 ? total : 0;
+      left -= cents;
+      if (cents > 0) {
+        const item = { description: fee.description.trim() || "Other fee", amount: cents / 100 };
+        shares.set(b.ledgerEntryId, [...(shares.get(b.ledgerEntryId) ?? []), item]);
+      }
+    });
+  }
+  const shareOf = (b: StatementBooking) => (shares.get(b.ledgerEntryId) ?? []).reduce((sum, f) => sum + f.amount, 0);
+  /** Everything taken off the ledger's amount, the other fees' share too. */
+  const cutOf = (b: StatementBooking) => ownCutOf(b) + shareOf(b);
   const income = bookings ? bookings.reduce((sum, b) => sum + b.amount - cutOf(b), 0) : null;
   React.useEffect(() => onIncome(income), [income, onIncome]);
 
   const payload = (bookings ?? [])
-    .filter((b) => Number(cuts[b.ledgerEntryId]?.value) > 0 || feesOf(cuts[b.ledgerEntryId]).length > 0)
+    .filter(
+      (b) =>
+        Number(cuts[b.ledgerEntryId]?.value) > 0 ||
+        feesOf(cuts[b.ledgerEntryId]).length > 0 ||
+        cuts[b.ledgerEntryId]?.manual ||
+        shares.has(b.ledgerEntryId)
+    )
     .map((b) => {
-      const c = cuts[b.ledgerEntryId];
+      const c: Cut = cuts[b.ledgerEntryId] ?? { value: "", unit: "aed" };
       const v = (Number(c.value) || 0) * (c.add ? -1 : 1);
-      const items = feesOf(c);
+      const items = [...feesOf(c), ...(shares.get(b.ledgerEntryId) ?? [])];
+      const byHand = c.manual
+        ? {
+            ...(c.rent !== undefined && c.rent !== "" ? { rent: Number(c.rent) } : {}),
+            ...(c.checkIn && c.checkOut ? { checkIn: c.checkIn, checkOut: c.checkOut } : {}),
+          }
+        : {};
       return v === 0
-        ? { ledgerEntryId: b.ledgerEntryId, items }
+        ? { ledgerEntryId: b.ledgerEntryId, items, ...byHand }
         : c.unit === "pct"
-          ? { ledgerEntryId: b.ledgerEntryId, pct: v, items }
-          : { ledgerEntryId: b.ledgerEntryId, amount: v, items };
+          ? { ledgerEntryId: b.ledgerEntryId, pct: v, items, ...byHand }
+          : { ledgerEntryId: b.ledgerEntryId, amount: v, items, ...byHand };
     });
 
   return (
@@ -274,10 +343,10 @@ function BookingDeductions({
           {bookings.map((b) => {
             const cut: Cut = cuts[b.ledgerEntryId] ?? { value: "", unit: "aed" };
             const over = cutOf(b) > b.amount;
+            const badDates = !!(cut.manual && cut.checkIn && cut.checkOut && cut.checkOut <= cut.checkIn);
+            // The dates the statement would show on its own: the stay's part in the period.
+            const autoOut = b.checkIn && b.nights != null ? addDays(b.checkIn, b.nights) : b.checkOut;
             const setCut = (patch: Partial<Cut>) => setCuts((c) => ({ ...c, [b.ledgerEntryId]: { ...cut, ...c[b.ledgerEntryId], ...patch } }));
-            const fees = cut.fees ?? [];
-            const setFee = (key: number, patch: Partial<BookingFee>) =>
-              setCut({ fees: fees.map((f) => (f.key === key ? { ...f, ...patch } : f)) });
             const money = (label: string, value: string | undefined, onChange: (v: string) => void) => (
               <label className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
                 <span className="w-20 shrink-0">{label}</span>
@@ -298,64 +367,94 @@ function BookingDeductions({
               <div key={b.ledgerEntryId} className="space-y-2 p-3">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-sm font-medium">{b.guest}</span>
-                  <span className="text-sm tabular-nums">{aed(b.amount)}</span>
+                  <span className="text-sm tabular-nums">
+                    {cut.manual && rentOf(b) !== b.amount && (
+                      <span className="mr-2 text-xs text-[var(--muted-foreground)] line-through">{aed(b.amount)}</span>
+                    )}
+                    {aed(rentOf(b))}
+                  </span>
                 </div>
                 <p className="text-xs text-[var(--muted-foreground)]">
                   {[b.unit, b.checkIn && b.checkOut ? `${formatDate(b.checkIn)} – ${formatDate(b.checkOut)}` : null, b.nights != null ? `${b.nights} nights` : null]
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
+                <label className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    className="size-4"
+                    checked={!!cut.manual}
+                    onChange={(e) =>
+                      setCut(
+                        e.target.checked
+                          ? {
+                              manual: true,
+                              rent: cut.rent || String(b.amount),
+                              checkIn: cut.checkIn || b.checkIn || "",
+                              checkOut: cut.checkOut || autoOut || "",
+                            }
+                          : { manual: false }
+                      )
+                    }
+                  />
+                  Set the dates and rent by hand
+                </label>
+                {cut.manual && (
+                  <div className="space-y-2 rounded-md bg-[var(--muted)] p-2">
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <label className="space-y-1 text-xs text-[var(--muted-foreground)]">
+                        <span>Check-in</span>
+                        <Input
+                          type="date"
+                          required
+                          className="h-8"
+                          aria-label={`${b.guest}: check-in on the statement`}
+                          value={cut.checkIn ?? ""}
+                          onChange={(e) => setCut({ checkIn: e.target.value })}
+                        />
+                      </label>
+                      <label className="space-y-1 text-xs text-[var(--muted-foreground)]">
+                        <span>Check-out</span>
+                        <Input
+                          type="date"
+                          required
+                          className="h-8"
+                          aria-label={`${b.guest}: check-out on the statement`}
+                          value={cut.checkOut ?? ""}
+                          onChange={(e) => setCut({ checkOut: e.target.value })}
+                        />
+                      </label>
+                      <label className="space-y-1 text-xs text-[var(--muted-foreground)]">
+                        <span>Rent (AED)</span>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          step="0.01"
+                          required
+                          className="h-8"
+                          aria-label={`${b.guest}: rent on the statement (AED)`}
+                          value={cut.rent ?? ""}
+                          onChange={(e) => setCut({ rent: e.target.value })}
+                        />
+                      </label>
+                    </div>
+                    <p className={`text-xs ${badDates ? "text-[var(--destructive)]" : "text-[var(--muted-foreground)]"}`}>
+                      {badDates
+                        ? "The check-out must come after the check-in."
+                        : `${cut.checkIn && cut.checkOut ? `${nightsFrom(cut.checkIn, cut.checkOut)} nights · ` : ""}Worked out on its own: ${aed(b.amount)}${b.nights != null ? `, ${b.nights} nights` : ""}. Untick to use it.`}
+                    </p>
+                  </div>
+                )}
                 <div className="grid gap-2 sm:grid-cols-2">
                   {money("Cleaning fee", cut.cleaning, (cleaning) => setCut({ cleaning }))}
                   {money("Guest fee", cut.guest, (guest) => setCut({ guest }))}
                 </div>
-                {fees.map((f, n) => (
-                  <div key={f.key} className="flex gap-2">
-                    <Input
-                      aria-label={`${b.guest}: other fee ${n + 1}, what it is for`}
-                      placeholder="e.g. DTCM"
-                      required
-                      maxLength={200}
-                      className="h-8"
-                      value={f.description}
-                      onChange={(e) => setFee(f.key, { description: e.target.value })}
-                    />
-                    <Input
-                      aria-label={`${b.guest}: other fee ${n + 1}, amount (AED)`}
-                      placeholder="AED"
-                      type="number"
-                      inputMode="decimal"
-                      min={0.01}
-                      step="0.01"
-                      required
-                      className="h-8 w-28 shrink-0"
-                      value={f.amount}
-                      onChange={(e) => setFee(f.key, { amount: e.target.value })}
-                    />
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="size-8 shrink-0"
-                      aria-label={`Remove ${b.guest}'s other fee ${n + 1}`}
-                      onClick={() => setCut({ fees: fees.filter((x) => x.key !== f.key) })}
-                    >
-                      <X className="size-4" />
-                    </Button>
-                  </div>
-                ))}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-8"
-                  onClick={() =>
-                    setCut({ fees: [...fees, { key: fees.reduce((m, f) => Math.max(m, f.key + 1), 0), description: "", amount: "" }] })
-                  }
-                >
-                  <Plus className="size-4" />
-                  Other fee
-                </Button>
+                {shareOf(b) > 0 && (
+                  <p className="text-xs text-[var(--muted-foreground)]">
+                    Other fees, its share: {aed(shareOf(b))}
+                  </p>
+                )}
                 <div className="flex items-center gap-2">
                   <Select
                     aria-label={`${b.guest}: deduct from or add to the rent`}
@@ -397,7 +496,7 @@ function BookingDeductions({
         </div>
       )}
       <p className="text-xs text-[var(--muted-foreground)]">
-        Each booking&apos;s cleaning fee, guest fee and other fees (e.g. DTCM) are taken off its rent at once, with
+        Each booking&apos;s cleaning fee, guest fee and share of the other fees are taken off its rent at once, with
         what you deduct; what you add goes on it (e.g. an Airbnb stay whose price came in for one night only). The
         owner&apos;s statement shows only the rent after them, and the management fee is worked out on that.
       </p>
@@ -410,7 +509,8 @@ export function GenerateStatementDialog({
   vatRate,
   edit,
 }: {
-  owners: { id: string; full_name: string }[];
+  /** With their units, for a statement per unit (0075). */
+  owners: { id: string; full_name: string; units?: { id: string; label: string }[] }[];
   /** company_settings.vat_rate, e.g. 0.05 */
   vatRate?: number | null;
   /** A draft statement to change (0071): opened with its figures, for its owner only. */
@@ -474,6 +574,7 @@ export function GenerateStatementDialog({
     setRestored(false);
   };
   const { ownerId, periodStart, periodEnd } = draft;
+  const ownerUnits = owners.find((o) => o.id === ownerId)?.units ?? [];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -534,7 +635,7 @@ export function GenerateStatementDialog({
                 required
                 disabled={editing}
                 value={ownerId}
-                onChange={(e) => setScope({ ownerId: e.target.value })}
+                onChange={(e) => setScope({ ownerId: e.target.value, unitId: "" })}
               >
                 <option value="" disabled>
                   Select an owner
@@ -548,6 +649,29 @@ export function GenerateStatementDialog({
               {/* A disabled field is not sent */}
               {editing && <input type="hidden" name="ownerId" value={ownerId} />}
             </div>
+
+            {(ownerUnits.length > 1 || draft.unitId) && (
+              <div className="space-y-1.5">
+                <Label htmlFor="unitId">Unit</Label>
+                <Select
+                  id="unitId"
+                  name="unitId"
+                  disabled={editing}
+                  value={draft.unitId ?? ""}
+                  onChange={(e) => setScope({ unitId: e.target.value })}
+                >
+                  <option value="">All {ownerUnits.length || ""} units on one statement</option>
+                  {ownerUnits.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.label}
+                    </option>
+                  ))}
+                </Select>
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  Choose a unit to make its own statement: only its bookings and the fees you enter here go on it.
+                </p>
+              </div>
+            )}
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
@@ -623,15 +747,26 @@ export function GenerateStatementDialog({
             />
             {/* Other fees are entered on each booking now, and taken off its rent (0073) */}
             <input type="hidden" name="otherCharges" value="[]" />
+            <FeeItems
+              name="otherFeesList"
+              label="Other fees"
+              noun="Other fee"
+              placeholder="e.g. DTCM, Cleaning Airbnb Fee"
+              hint="Taken off the bookings' rent below, split between them by their rent. The owner sees only the rent after them, never these names."
+              items={draft.others}
+              onItems={(update) => setDraft((d) => ({ ...d, others: update(d.others) }))}
+            />
 
             <BookingDeductions
-              key={`${ownerId}|${periodStart}|${periodEnd}`}
+              key={`${ownerId}|${draft.unitId ?? ""}|${periodStart}|${periodEnd}`}
               ownerId={ownerId}
               periodStart={periodStart}
               periodEnd={periodEnd}
               statementId={edit?.statementId}
+              unitId={draft.unitId}
               onIncome={setIncome}
               cuts={draft.cuts}
+              others={draft.others}
               setCuts={(update) => setDraft((d) => ({ ...d, cuts: update(d.cuts) }))}
             />
 

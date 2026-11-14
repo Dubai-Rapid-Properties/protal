@@ -3121,6 +3121,7 @@ export type Database = {
           original_amount_aed: number | null;
           deduction_aed: number | null;
           deduction_items: Json | null;
+          adjustment: Json | null;
         };
         Insert: {
           id?: string;
@@ -3146,6 +3147,7 @@ export type Database = {
           original_amount_aed?: number | null;
           deduction_aed?: number | null;
           deduction_items?: Json | null;
+          adjustment?: Json | null;
         };
         Update: {
           id?: string;
@@ -3171,6 +3173,7 @@ export type Database = {
           original_amount_aed?: number | null;
           deduction_aed?: number | null;
           deduction_items?: Json | null;
+          adjustment?: Json | null;
         };
         Relationships: [
           {
@@ -3213,6 +3216,7 @@ export type Database = {
           fee_vat_applied: boolean | null;
           other_fees_aed: number;
           other_fees_note: string | null;
+          unit_id: string | null;
           other_charges_aed: number;
           other_charges: Json;
           opening_balance_aed: number;
@@ -3252,6 +3256,7 @@ export type Database = {
           fee_vat_applied?: boolean | null;
           other_fees_aed?: number;
           other_fees_note?: string | null;
+          unit_id?: string | null;
           other_charges_aed?: number;
           other_charges?: Json;
           opening_balance_aed?: number;
@@ -3291,6 +3296,7 @@ export type Database = {
           fee_vat_applied?: boolean | null;
           other_fees_aed?: number;
           other_fees_note?: string | null;
+          unit_id?: string | null;
           other_charges_aed?: number;
           other_charges?: Json;
           opening_balance_aed?: number;
@@ -3315,6 +3321,13 @@ export type Database = {
           return_note?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "owner_statements_unit_id_fkey";
+            columns: ["unit_id"];
+            isOneToOne: false;
+            referencedRelation: "units";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "owner_statements_approved_by_fkey";
             columns: ["approved_by"];
@@ -5620,6 +5633,7 @@ export type Database = {
           p_other_items?: Json;
           p_other_charges?: Json;
           p_booking_adjustments?: Json;
+          p_unit_id?: string | null;
         };
         Returns: unknown;
       };

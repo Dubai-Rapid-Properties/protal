@@ -55,6 +55,12 @@ const amountOrPct = (what: string) =>
 
 const statementSchema = z.object({
   ownerId: z.string().uuid("Select an owner"),
+  // One of the owner's units only (0075); empty for all of them.
+  unitId: z
+    .string()
+    .optional()
+    .transform((v) => (v ? v : undefined))
+    .pipe(z.string().uuid("Select a unit").optional()),
   periodStart: z.string().min(1, "Period start is required"),
   periodEnd: z.string().min(1, "Period end is required"),
   // Set per statement: the fee differs from owner to owner (0054).
@@ -92,8 +98,16 @@ const statementSchema = z.object({
             })
           )
           .default([]),
+        // Set by hand (0075): the rent and dates the statement shows instead of the ledger's.
+        rent: z.number().min(0, "A rent set by hand cannot be negative").max(10_000_000).optional(),
+        checkIn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        checkOut: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       })
       .refine((v) => v.amount === undefined || v.pct === undefined, "Give each booking deduction an amount or a %, not both")
+      .refine(
+        (v) => (v.checkIn === undefined) === (v.checkOut === undefined) && (!v.checkIn || v.checkIn < v.checkOut!),
+        "A booking's check-out must come after its check-in"
+      )
   ),
 });
 
@@ -112,7 +126,7 @@ function statementArgs(input: z.infer<typeof statementSchema>) {
       i.pct !== undefined ? { description: i.description, pct: i.pct } : { description: i.description, amount: round2(i.amount ?? 0) }
     ),
     p_booking_adjustments: input.bookingAdjustments
-      .filter((a) => (a.pct ?? a.amount ?? 0) !== 0 || a.items.length > 0)
+      .filter((a) => (a.pct ?? a.amount ?? 0) !== 0 || a.items.length > 0 || a.rent !== undefined || a.checkIn !== undefined)
       .map((a) => ({
         ledger_entry_id: a.ledgerEntryId,
         ...(a.pct !== undefined && a.pct !== 0
@@ -121,6 +135,8 @@ function statementArgs(input: z.infer<typeof statementSchema>) {
             ? { amount: round2(a.amount) }
             : {}),
         ...(a.items.length ? { items: a.items.map((i) => ({ description: i.description, amount: round2(i.amount) })) } : {}),
+        ...(a.rent !== undefined ? { rent: round2(a.rent) } : {}),
+        ...(a.checkIn && a.checkOut ? { check_in: a.checkIn, check_out: a.checkOut } : {}),
       })),
   };
 }
@@ -158,6 +174,7 @@ export async function generateStatement(
   if (postError) return { error: postError.message };
   const { data, error } = await supabase.rpc("generate_owner_statement", {
     p_owner_id: input.ownerId,
+    p_unit_id: input.unitId ?? null,
     ...statementArgs(input),
   });
 
@@ -165,7 +182,9 @@ export async function generateStatement(
     if (error.message.includes("already exists")) {
       return {
         error:
-          "A statement already covers this owner and period. Void the existing one before regenerating.",
+          input.unitId
+            ? "A statement already covers this unit and period. Void the existing one before regenerating."
+            : "A statement already covers this owner and period. Void the existing one before regenerating.",
       };
     }
     return { error: error.message };
@@ -501,7 +520,9 @@ export async function statementBookings(
   periodStart: string,
   periodEnd: string,
   /** A draft being edited: its own bookings are listed too. */
-  statementId?: string
+  statementId?: string,
+  /** One of the owner's units only (0075). */
+  unitId?: string
 ): Promise<StatementBooking[]> {
   const profile = await requireProfile();
   if (!can(profile.role, "statements.issue")) return [];
@@ -510,16 +531,19 @@ export async function statementBookings(
     return [];
   }
   if (statementId !== undefined && !z.string().uuid().safeParse(statementId).success) return [];
+  if (unitId !== undefined && !z.string().uuid().safeParse(unitId).success) return [];
 
   const supabase = await createClient();
   // The period's stays still to come are listed too (0068).
   await supabase.rpc("post_completed_bookings", { p_until: periodEnd });
-  const { data } = await supabase
+  let query = supabase
     .from("ledger_entries")
     .select(
       "id, entry_date, description, amount_aed, stay_nights, units(unit_number, properties(name)), gl_categories!inner(affects_owner_statement), bookings(check_in, check_out, nights, guests(full_name))"
     )
-    .eq("owner_id", ownerId)
+    .eq("owner_id", ownerId);
+  if (unitId) query = query.eq("unit_id", unitId);
+  const { data } = await query
     .eq("direction", "income")
     .eq("is_owner_visible", true)
     .eq("gl_categories.affects_owner_statement", true)
