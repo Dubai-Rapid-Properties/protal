@@ -58,6 +58,8 @@ export type Cut = {
   add?: boolean;
   cleaning?: string;
   guest?: string;
+  /** The booking's other fees, one amount (e.g. DTCM). */
+  other?: string;
   fees?: BookingFee[];
   /** The rent and dates set by hand (0075), in place of the ledger's. */
   manual?: boolean;
@@ -83,6 +85,7 @@ const feesOf = (c: Cut | undefined) =>
     ? [
         { description: "Cleaning fee", amount: Number(c.cleaning) || 0 },
         { description: "Guest fee", amount: Number(c.guest) || 0 },
+        { description: "Other fees", amount: Number(c.other) || 0 },
       ].filter((f) => f.amount > 0)
     : [];
 
@@ -235,8 +238,6 @@ function BookingDeductions({
   onIncome,
   cuts,
   setCuts,
-  others,
-  otherFees,
 }: {
   ownerId: string;
   /** One of the owner's units only (0075). */
@@ -248,10 +249,6 @@ function BookingDeductions({
   onIncome: (income: number | null) => void;
   cuts: Cuts;
   setCuts: (update: (cuts: Cuts) => Cuts) => void;
-  /** Other fees for the whole statement, taken off the bookings' rent, split by rent. */
-  others: FeeItem[];
-  /** The other fees' list, shown in the bookings' box above the guests. */
-  otherFees?: React.ReactNode;
 }) {
   const [bookings, setBookings] = React.useState<StatementBooking[] | null>(null);
 
@@ -280,48 +277,21 @@ function BookingDeductions({
     const adjust = c?.unit === "pct" ? Math.round(rent * v) / 100 : v;
     return b.amount - rent + adjust + feesOf(c).reduce((sum, f) => sum + f.amount, 0);
   };
-  // The statement's other fees, each split over the bookings by their rent; the last takes the cents left.
-  const shares = new Map<string, { description: string; amount: number }[]>();
-  const list = bookings ?? [];
-  const weights = list.map((b) => Math.max(0, b.amount - ownCutOf(b)));
-  const weightTotal = weights.reduce((sum, w) => sum + w, 0);
-  for (const fee of others) {
-    // A %: of the bookings' rent before the other fees, as before (0061).
-    const total =
-      fee.unit === "pct"
-        ? Math.round(weightTotal * (Number(fee.amount) || 0))
-        : Math.round((Number(fee.amount) || 0) * 100);
-    if (total <= 0 || list.length === 0) continue;
-    let left = total;
-    list.forEach((b, i) => {
-      const last = i === list.length - 1;
-      const cents = last ? left : weightTotal > 0 ? Math.round((total * weights[i]) / weightTotal) : i === 0 ? total : 0;
-      left -= cents;
-      if (cents > 0) {
-        const item = { description: fee.description.trim() || "Other fee", amount: cents / 100 };
-        shares.set(b.ledgerEntryId, [...(shares.get(b.ledgerEntryId) ?? []), item]);
-      }
-    });
-  }
-  const shareOf = (b: StatementBooking) => (shares.get(b.ledgerEntryId) ?? []).reduce((sum, f) => sum + f.amount, 0);
-  /** Everything taken off the ledger's amount, the other fees' share too. */
-  const cutOf = (b: StatementBooking) => ownCutOf(b) + shareOf(b);
+  const cutOf = ownCutOf;
   const income = bookings ? bookings.reduce((sum, b) => sum + b.amount - cutOf(b), 0) : null;
-  const before = bookings ? weightTotal : null;
-  React.useEffect(() => onIncome(before), [before, onIncome]);
+  React.useEffect(() => onIncome(income), [income, onIncome]);
 
   const payload = (bookings ?? [])
     .filter(
       (b) =>
         Number(cuts[b.ledgerEntryId]?.value) > 0 ||
         feesOf(cuts[b.ledgerEntryId]).length > 0 ||
-        cuts[b.ledgerEntryId]?.manual ||
-        shares.has(b.ledgerEntryId)
+        cuts[b.ledgerEntryId]?.manual
     )
     .map((b) => {
       const c: Cut = cuts[b.ledgerEntryId] ?? { value: "", unit: "aed" };
       const v = (Number(c.value) || 0) * (c.add ? -1 : 1);
-      const items = [...feesOf(c), ...(shares.get(b.ledgerEntryId) ?? [])];
+      const items = feesOf(c);
       const byHand = c.manual
         ? {
             ...(c.rent !== undefined && c.rent !== "" ? { rent: Number(c.rent) } : {}),
@@ -349,7 +319,6 @@ function BookingDeductions({
         <p className="text-xs text-[var(--muted-foreground)]">No bookings in this period that are not on a statement already.</p>
       ) : (
         <div className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
-          {otherFees && <div className="bg-[var(--muted)]/40 p-3">{otherFees}</div>}
           {bookings.map((b) => {
             const cut: Cut = cuts[b.ledgerEntryId] ?? { value: "", unit: "aed" };
             const over = cutOf(b) > b.amount;
@@ -459,12 +428,8 @@ function BookingDeductions({
                 <div className="grid gap-2 sm:grid-cols-2">
                   {money("Cleaning fee", cut.cleaning, (cleaning) => setCut({ cleaning }))}
                   {money("Guest fee", cut.guest, (guest) => setCut({ guest }))}
+                  {money("Other fees", cut.other, (other) => setCut({ other }))}
                 </div>
-                {shareOf(b) > 0 && (
-                  <p className="text-xs text-[var(--muted-foreground)]">
-                    Other fees, its share: {aed(shareOf(b))}
-                  </p>
-                )}
                 <div className="flex items-center gap-2">
                   <Select
                     aria-label={`${b.guest}: deduct from or add to the rent`}
@@ -506,7 +471,7 @@ function BookingDeductions({
         </div>
       )}
       <p className="text-xs text-[var(--muted-foreground)]">
-        Each booking&apos;s cleaning fee, guest fee and share of the other fees are taken off its rent at once, with
+        Each booking&apos;s cleaning fee, guest fee and other fees are taken off its rent at once, with
         what you deduct; what you add goes on it (e.g. an Airbnb stay whose price came in for one night only). The
         owner&apos;s statement shows only the rent after them, and the management fee is worked out on that.
       </p>
@@ -535,7 +500,7 @@ export function GenerateStatementDialog({
   const blank: Draft = edit?.draft ?? { ownerId: "", periodStart: start, periodEnd: end, feePct: "", feeVat: true, utilities: [], maintenance: [], others: [], cuts: {} };
   const [draft, setDraft] = React.useState<Draft>(blank);
   const [restored, setRestored] = React.useState(false);
-  const [income, setIncome] = React.useState<number | null>(null);
+  const [, setIncome] = React.useState<number | null>(null);
   const loaded = React.useRef(false);
   const saving = React.useRef(true);
 
@@ -767,20 +732,6 @@ export function GenerateStatementDialog({
               unitId={draft.unitId}
               onIncome={setIncome}
               cuts={draft.cuts}
-              others={draft.others}
-              otherFees={
-                <FeeItems
-                  name="otherFeesList"
-                  label="Other fees"
-                  noun="Other fee"
-                  placeholder="e.g. DTCM, Cleaning Airbnb Fee"
-                  hint="For the bookings below: taken off their rent at once, split between them by their rent. The owner sees only the rent after them, never these names. A % is of the bookings' rent."
-                  allowPct
-                  income={income}
-                  items={draft.others}
-                  onItems={(update) => setDraft((d) => ({ ...d, others: update(d.others) }))}
-                />
-              }
               setCuts={(update) => setDraft((d) => ({ ...d, cuts: update(d.cuts) }))}
             />
 

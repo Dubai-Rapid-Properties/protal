@@ -82,16 +82,8 @@ export default async function StatementDetailPage({
         maintenance: (lines ?? [])
           .filter((l) => l.category_code === "EXP-MAINT" && !l.ledger_entry_id)
           .map((l, key) => ({ key, description: l.description, amount: String(Number(l.amount_aed)), unit: "aed" as const })),
-        // Other fees: the statement's own (before 0073), and the shares taken off the bookings, summed by name.
-        others: [
-          ...otherCharges.map((c) => ({ description: c.description, amount: Number(c.amount) })),
-          ...Object.entries(
-            deducted
-              .flatMap((l) => feesOn(l))
-              .filter((f) => f.description !== "Cleaning fee" && f.description !== "Guest fee")
-              .reduce<Record<string, number>>((sum, f) => ({ ...sum, [f.description]: (sum[f.description] ?? 0) + Number(f.amount) }), {})
-          ).map(([description, amount]) => ({ description, amount })),
-        ].map((f, key) => ({ key, description: f.description, amount: String(Math.round(f.amount * 100) / 100), unit: "aed" as const })),
+        // Other fees are entered on each booking now.
+        others: [],
         cuts: Object.fromEntries(
           deducted
             .filter((l) => l.ledger_entry_id)
@@ -111,6 +103,13 @@ export default async function StatementDetailPage({
                   add: base < 0,
                   cleaning: named("Cleaning fee") ? String(Number(named("Cleaning fee")!.amount)) : "",
                   guest: named("Guest fee") ? String(Number(named("Guest fee")!.amount)) : "",
+                  // Every other fee on the booking, as one amount.
+                  other: (() => {
+                    const sum = fees
+                      .filter((f) => f.description !== "Cleaning fee" && f.description !== "Guest fee")
+                      .reduce((total, f) => total + Number(f.amount), 0);
+                    return sum > 0 ? String(Math.round(sum * 100) / 100) : "";
+                  })(),
                   ...(entered && (entered.rent != null || entered.check_in)
                     ? {
                         manual: true,
