@@ -61,6 +61,9 @@ export default async function StatementDetailPage({
   }[];
   // Booking deductions (0061): the owner sees only the rent after them.
   const deducted = (lines ?? []).filter((l) => l.deduction_aed != null);
+  // The booking's own fees taken off with it (0073): cleaning, guest fee, others.
+  const feesOn = (l: { deduction_items: unknown }) =>
+    (Array.isArray(l.deduction_items) ? l.deduction_items : []) as { description: string; amount: number }[];
 
   // A draft not waiting for the approver can be edited (0071): the dialog opens on its figures.
   const editable = statement.status === "draft" && !statement.submitted_at && can(profile.role, "statements.issue");
@@ -86,10 +89,24 @@ export default async function StatementDetailPage({
         cuts: Object.fromEntries(
           deducted
             .filter((l) => l.ledger_entry_id)
-            .map((l) => [
-              l.ledger_entry_id as string,
-              { value: String(Math.abs(Number(l.deduction_aed))), unit: "aed" as const, add: Number(l.deduction_aed) < 0 },
-            ])
+            .map((l) => {
+              const fees = feesOn(l);
+              const named = (name: string) => fees.find((f) => f.description === name);
+              const others = fees.filter((f) => f !== named("Cleaning fee") && f !== named("Guest fee"));
+              // The adjustment itself: what is left once the fees are taken out.
+              const base = Math.round((Number(l.deduction_aed) - fees.reduce((sum, f) => sum + Number(f.amount), 0)) * 100) / 100;
+              return [
+                l.ledger_entry_id as string,
+                {
+                  value: base === 0 ? "" : String(Math.abs(base)),
+                  unit: "aed" as const,
+                  add: base < 0,
+                  cleaning: named("Cleaning fee") ? String(Number(named("Cleaning fee")!.amount)) : "",
+                  guest: named("Guest fee") ? String(Number(named("Guest fee")!.amount)) : "",
+                  fees: others.map((f, key) => ({ key, description: f.description, amount: String(Number(f.amount)) })),
+                },
+              ];
+            })
         ),
       }
     : null;
@@ -186,7 +203,16 @@ export default async function StatementDetailPage({
               <ul className="space-y-1 text-sm">
                 {deducted.map((l) => (
                   <li key={l.id} className="flex flex-wrap justify-between gap-x-4">
-                    <span>{l.guest_name || l.description}</span>
+                    <span>
+                      {l.guest_name || l.description}
+                      {feesOn(l).length > 0 && (
+                        <span className="block text-xs text-[var(--muted-foreground)]">
+                          {feesOn(l)
+                            .map((f) => `${f.description} ${Number(f.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`)
+                            .join(" · ")}
+                        </span>
+                      )}
+                    </span>
                     <span className="tabular-nums text-[var(--muted-foreground)]">
                       <Money amount={l.original_amount_aed} /> {Number(l.deduction_aed) < 0 ? "+" : "−"}{" "}
                       <Money amount={Math.abs(Number(l.deduction_aed))} /> ={" "}

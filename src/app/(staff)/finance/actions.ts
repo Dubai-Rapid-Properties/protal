@@ -76,9 +76,24 @@ const statementSchema = z.object({
       .and(amountOrPct("An other fee"))
   ),
   // Taken off a booking's rent before the statement shows it (0061).
+  // With the booking's own fees (0073): cleaning, guest fee, DTCM... taken off with it.
   bookingAdjustments: jsonList(
     "booking deduction",
-    z.object({ ledgerEntryId: z.string().uuid() }).and(amountOrPct("A booking deduction"))
+    z
+      .object({
+        ledgerEntryId: z.string().uuid(),
+        amount: z.number().min(-10_000_000).max(10_000_000).optional(),
+        pct: z.number().min(-1000).max(100, "A booking deduction cannot be over 100%").optional(),
+        items: z
+          .array(
+            z.object({
+              description: z.string().trim().min(1, "Say what each booking fee is for").max(200),
+              amount: z.number().positive("Each booking fee needs an amount above 0").max(10_000_000),
+            })
+          )
+          .default([]),
+      })
+      .refine((v) => v.amount === undefined || v.pct === undefined, "Give each booking deduction an amount or a %, not both")
   ),
 });
 
@@ -97,10 +112,16 @@ function statementArgs(input: z.infer<typeof statementSchema>) {
       i.pct !== undefined ? { description: i.description, pct: i.pct } : { description: i.description, amount: round2(i.amount ?? 0) }
     ),
     p_booking_adjustments: input.bookingAdjustments
-      .filter((a) => (a.pct ?? a.amount ?? 0) !== 0)
-      .map((a) =>
-        a.pct !== undefined ? { ledger_entry_id: a.ledgerEntryId, pct: a.pct } : { ledger_entry_id: a.ledgerEntryId, amount: round2(a.amount ?? 0) }
-      ),
+      .filter((a) => (a.pct ?? a.amount ?? 0) !== 0 || a.items.length > 0)
+      .map((a) => ({
+        ledger_entry_id: a.ledgerEntryId,
+        ...(a.pct !== undefined && a.pct !== 0
+          ? { pct: a.pct }
+          : a.amount !== undefined && a.amount !== 0
+            ? { amount: round2(a.amount) }
+            : {}),
+        ...(a.items.length ? { items: a.items.map((i) => ({ description: i.description, amount: round2(i.amount) })) } : {}),
+      })),
   };
 }
 

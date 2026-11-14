@@ -3120,6 +3120,7 @@ export type Database = {
           mgmt_fee_vat_aed: number | null;
           original_amount_aed: number | null;
           deduction_aed: number | null;
+          deduction_items: Json | null;
         };
         Insert: {
           id?: string;
@@ -3144,6 +3145,7 @@ export type Database = {
           mgmt_fee_vat_aed?: number | null;
           original_amount_aed?: number | null;
           deduction_aed?: number | null;
+          deduction_items?: Json | null;
         };
         Update: {
           id?: string;
@@ -3168,6 +3170,7 @@ export type Database = {
           mgmt_fee_vat_aed?: number | null;
           original_amount_aed?: number | null;
           deduction_aed?: number | null;
+          deduction_items?: Json | null;
         };
         Relationships: [
           {
