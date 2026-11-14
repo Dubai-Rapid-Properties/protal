@@ -236,6 +236,7 @@ function BookingDeductions({
   cuts,
   setCuts,
   others,
+  otherFees,
 }: {
   ownerId: string;
   /** One of the owner's units only (0075). */
@@ -249,6 +250,8 @@ function BookingDeductions({
   setCuts: (update: (cuts: Cuts) => Cuts) => void;
   /** Other fees for the whole statement, taken off the bookings' rent, split by rent. */
   others: FeeItem[];
+  /** The other fees' list, shown in the bookings' box above the guests. */
+  otherFees?: React.ReactNode;
 }) {
   const [bookings, setBookings] = React.useState<StatementBooking[] | null>(null);
 
@@ -346,6 +349,7 @@ function BookingDeductions({
         <p className="text-xs text-[var(--muted-foreground)]">No bookings in this period that are not on a statement already.</p>
       ) : (
         <div className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
+          {otherFees && <div className="bg-[var(--muted)]/40 p-3">{otherFees}</div>}
           {bookings.map((b) => {
             const cut: Cut = cuts[b.ledgerEntryId] ?? { value: "", unit: "aed" };
             const over = cutOf(b) > b.amount;
@@ -753,17 +757,6 @@ export function GenerateStatementDialog({
             />
             {/* Other fees are entered on each booking now, and taken off its rent (0073) */}
             <input type="hidden" name="otherCharges" value="[]" />
-            <FeeItems
-              name="otherFeesList"
-              label="Other fees"
-              noun="Other fee"
-              placeholder="e.g. DTCM, Cleaning Airbnb Fee"
-              hint="Taken off the bookings' rent below at once, split between them by their rent. The owner sees only the rent after them, never these names. A % is of the bookings' rent."
-              allowPct
-              income={income}
-              items={draft.others}
-              onItems={(update) => setDraft((d) => ({ ...d, others: update(d.others) }))}
-            />
 
             <BookingDeductions
               key={`${ownerId}|${draft.unitId ?? ""}|${periodStart}|${periodEnd}`}
@@ -775,6 +768,19 @@ export function GenerateStatementDialog({
               onIncome={setIncome}
               cuts={draft.cuts}
               others={draft.others}
+              otherFees={
+                <FeeItems
+                  name="otherFeesList"
+                  label="Other fees"
+                  noun="Other fee"
+                  placeholder="e.g. DTCM, Cleaning Airbnb Fee"
+                  hint="For the bookings below: taken off their rent at once, split between them by their rent. The owner sees only the rent after them, never these names. A % is of the bookings' rent."
+                  allowPct
+                  income={income}
+                  items={draft.others}
+                  onItems={(update) => setDraft((d) => ({ ...d, others: update(d.others) }))}
+                />
+              }
               setCuts={(update) => setDraft((d) => ({ ...d, cuts: update(d.cuts) }))}
             />
 
