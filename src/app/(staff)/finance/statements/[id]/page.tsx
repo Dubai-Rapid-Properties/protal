@@ -91,7 +91,7 @@ export default async function StatementDetailPage({
               const fees = feesOn(l);
               const named = (name: string) => fees.find((f) => f.description === name);
               // As entered (0075); before that, what is left once the fees are taken out.
-              const entered = (l.adjustment ?? null) as { amount?: number; pct?: number; rent?: number; check_in?: string; check_out?: string } | null;
+              const entered = (l.adjustment ?? null) as { amount?: number; pct?: number; rent?: number; rate?: number; check_in?: string; check_out?: string } | null;
               const base = entered
                 ? (entered.pct ?? entered.amount ?? 0)
                 : Math.round((Number(l.deduction_aed) - fees.reduce((sum, f) => sum + Number(f.amount), 0)) * 100) / 100;
@@ -114,6 +114,7 @@ export default async function StatementDetailPage({
                     ? {
                         manual: true,
                         rent: entered.rent != null ? String(entered.rent) : String(Number(l.original_amount_aed)),
+                        rate: entered.rate != null ? String(entered.rate) : "",
                         checkIn: entered.check_in ?? "",
                         checkOut: entered.check_out ?? "",
                       }
