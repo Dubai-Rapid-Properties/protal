@@ -60,6 +60,8 @@ export type Cut = {
   guest?: string;
   /** The booking's other fees, one amount (e.g. DTCM). */
   other?: string;
+  /** What the other fees are for, e.g. DEWA, Du; staff only. */
+  otherName?: string;
   fees?: BookingFee[];
   /** The rent and dates set by hand (0075), in place of the ledger's. */
   manual?: boolean;
@@ -94,7 +96,7 @@ const feesOf = (c: Cut | undefined) =>
     ? [
         { description: "Cleaning fee", amount: Number(c.cleaning) || 0 },
         { description: "Guest fee", amount: Number(c.guest) || 0 },
-        { description: "Other fees", amount: Number(c.other) || 0 },
+        { description: c.otherName?.trim() || "Other fees", amount: Number(c.other) || 0 },
       ].filter((f) => f.amount > 0)
     : [];
 
@@ -452,7 +454,28 @@ function BookingDeductions({
                 <div className="grid gap-2 sm:grid-cols-2">
                   {money("Cleaning fee", cut.cleaning, (cleaning) => setCut({ cleaning }))}
                   {money("Guest fee", cut.guest, (guest) => setCut({ guest }))}
-                  {money("Other fees", cut.other, (other) => setCut({ other }))}
+                  <div className="flex items-center gap-2 sm:col-span-2">
+                    <span className="w-20 shrink-0 text-xs text-[var(--muted-foreground)]">Other fees</span>
+                    <Input
+                      aria-label={`${b.guest}: what the other fees are for`}
+                      placeholder="What for, e.g. DEWA, Du"
+                      maxLength={200}
+                      className="h-8"
+                      value={cut.otherName ?? ""}
+                      onChange={(e) => setCut({ otherName: e.target.value })}
+                    />
+                    <Input
+                      aria-label={`Other fees for ${b.guest} (AED)`}
+                      placeholder="AED"
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      step="0.01"
+                      className="h-8 w-28 shrink-0"
+                      value={cut.other ?? ""}
+                      onChange={(e) => setCut({ other: e.target.value })}
+                    />
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Select
