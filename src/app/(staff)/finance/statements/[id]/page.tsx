@@ -17,7 +17,7 @@ const getStatement = cache(async (id: string) => {
   const supabase = await createClient();
   const { data } = await supabase
     .from("owner_statements")
-    .select("*, owners(id, full_name, email, phone, address_line, trn)")
+    .select("*, owners(id, full_name, email, phone, address_line, trn), units(id, unit_number, properties(name))")
     .eq("id", id)
     .maybeSingle();
   return data;
@@ -70,6 +70,7 @@ export default async function StatementDetailPage({
   const editDraft: Draft | null = editable
     ? {
         ownerId: statement.owner_id,
+        unitId: statement.unit_id ?? "",
         periodStart: statement.period_start,
         periodEnd: statement.period_end,
         feePct: statement.management_fee_pct != null ? String(Number(statement.management_fee_pct)) : "",
@@ -81,29 +82,43 @@ export default async function StatementDetailPage({
         maintenance: (lines ?? [])
           .filter((l) => l.category_code === "EXP-MAINT" && !l.ledger_entry_id)
           .map((l, key) => ({ key, description: l.description, amount: String(Number(l.amount_aed)), unit: "aed" as const })),
-        others: otherCharges.map((c, key) =>
-          c.pct != null
-            ? { key, description: c.description, amount: String(Number(c.pct)), unit: "pct" as const }
-            : { key, description: c.description, amount: String(Number(c.amount)), unit: "aed" as const }
-        ),
+        // Other fees: the statement's own (before 0073), and the shares taken off the bookings, summed by name.
+        others: [
+          ...otherCharges.map((c) => ({ description: c.description, amount: Number(c.amount) })),
+          ...Object.entries(
+            deducted
+              .flatMap((l) => feesOn(l))
+              .filter((f) => f.description !== "Cleaning fee" && f.description !== "Guest fee")
+              .reduce<Record<string, number>>((sum, f) => ({ ...sum, [f.description]: (sum[f.description] ?? 0) + Number(f.amount) }), {})
+          ).map(([description, amount]) => ({ description, amount })),
+        ].map((f, key) => ({ key, description: f.description, amount: String(Math.round(f.amount * 100) / 100), unit: "aed" as const })),
         cuts: Object.fromEntries(
           deducted
             .filter((l) => l.ledger_entry_id)
             .map((l) => {
               const fees = feesOn(l);
               const named = (name: string) => fees.find((f) => f.description === name);
-              const others = fees.filter((f) => f !== named("Cleaning fee") && f !== named("Guest fee"));
-              // The adjustment itself: what is left once the fees are taken out.
-              const base = Math.round((Number(l.deduction_aed) - fees.reduce((sum, f) => sum + Number(f.amount), 0)) * 100) / 100;
+              // As entered (0075); before that, what is left once the fees are taken out.
+              const entered = (l.adjustment ?? null) as { amount?: number; pct?: number; rent?: number; check_in?: string; check_out?: string } | null;
+              const base = entered
+                ? (entered.pct ?? entered.amount ?? 0)
+                : Math.round((Number(l.deduction_aed) - fees.reduce((sum, f) => sum + Number(f.amount), 0)) * 100) / 100;
               return [
                 l.ledger_entry_id as string,
                 {
                   value: base === 0 ? "" : String(Math.abs(base)),
-                  unit: "aed" as const,
+                  unit: entered?.pct != null ? ("pct" as const) : ("aed" as const),
                   add: base < 0,
                   cleaning: named("Cleaning fee") ? String(Number(named("Cleaning fee")!.amount)) : "",
                   guest: named("Guest fee") ? String(Number(named("Guest fee")!.amount)) : "",
-                  fees: others.map((f, key) => ({ key, description: f.description, amount: String(Number(f.amount)) })),
+                  ...(entered && (entered.rent != null || entered.check_in)
+                    ? {
+                        manual: true,
+                        rent: entered.rent != null ? String(entered.rent) : String(Number(l.original_amount_aed)),
+                        checkIn: entered.check_in ?? "",
+                        checkOut: entered.check_out ?? "",
+                      }
+                    : {}),
                 },
               ];
             })
@@ -120,7 +135,11 @@ export default async function StatementDetailPage({
             { label: "Statements", href: "/finance/statements" },
           ]}
           title={statement.statement_number}
-          description={statement.owners?.full_name ?? undefined}
+          description={
+            [statement.owners?.full_name, statement.units ? `${statement.units.properties?.name ?? ""} ${statement.units.unit_number}`.trim() : null]
+              .filter(Boolean)
+              .join(" · ") || undefined
+          }
           actions={
             <StatementActions
               statementId={id}
@@ -133,7 +152,15 @@ export default async function StatementDetailPage({
               editButton={
                 editDraft && statement.owners ? (
                   <GenerateStatementDialog
-                    owners={[{ id: statement.owners.id, full_name: statement.owners.full_name }]}
+                    owners={[
+                      {
+                        id: statement.owners.id,
+                        full_name: statement.owners.full_name,
+                        units: statement.units
+                          ? [{ id: statement.units.id, label: `${statement.units.properties?.name ?? ""} ${statement.units.unit_number}`.trim() }]
+                          : [],
+                      },
+                    ]}
                     vatRate={settings?.vat_rate}
                     edit={{ statementId: id, draft: editDraft }}
                   />

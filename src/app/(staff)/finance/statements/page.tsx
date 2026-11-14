@@ -29,15 +29,29 @@ export default async function StatementsPage() {
     requireCapability("statements.view"),
     supabase
       .from("owner_statements")
-      .select("*, owners(id, full_name)")
+      .select("*, owners(id, full_name), units(unit_number, properties(name))")
       .order("period_start", { ascending: false }),
-    supabase.from("owners").select("id, full_name").eq("is_active", true).order("full_name"),
+    supabase
+      .from("owners")
+      .select("id, full_name, unit_ownerships(end_date, units(id, unit_number, properties(name)))")
+      .eq("is_active", true)
+      .order("full_name"),
     getCompanySettings(),
   ]);
 
   const statements = statementsResult.data ?? [];
   // Only used by the generate dialog, which only issuers see.
-  const owners = can(profile.role, "statements.issue") ? (ownersResult.data ?? []) : [];
+  // Each owner with their units, for a statement per unit (0075).
+  const owners = can(profile.role, "statements.issue")
+    ? (ownersResult.data ?? []).map((o) => ({
+        id: o.id,
+        full_name: o.full_name,
+        units: (o.unit_ownerships ?? [])
+          .filter((uo) => !uo.end_date && uo.units)
+          .map((uo) => ({ id: uo.units!.id, label: `${uo.units!.properties?.name ?? ""} ${uo.units!.unit_number}`.trim() }))
+          .sort((a, b) => a.label.localeCompare(b.label)),
+      }))
+    : [];
   // Drafts sent for approval (0060); the approver sees them first.
   const waiting = statements.filter((s) => s.status === "draft" && s.submitted_at);
   const canApprove = await canApproveStatements();
@@ -107,7 +121,11 @@ export default async function StatementsPage() {
   );
 }
 
-type StatementRow = Tables<"owner_statements"> & { owners: { id: string; full_name: string } | null };
+type StatementRow = Tables<"owner_statements"> & {
+  owners: { id: string; full_name: string } | null;
+  /** One unit only (0075). */
+  units: { unit_number: string; properties: { name: string } | null } | null;
+};
 
 function StatementsTable({ statements }: { statements: StatementRow[] }) {
   return (
@@ -142,6 +160,11 @@ function StatementsTable({ statements }: { statements: StatementRow[] }) {
               </TableCell>
               <TableCell className="text-sm">
                 {statement.owners?.full_name ?? "—"}
+                {statement.units && (
+                  <p className="text-xs text-[var(--muted-foreground)]">
+                    {`${statement.units.properties?.name ?? ""} ${statement.units.unit_number}`.trim()}
+                  </p>
+                )}
               </TableCell>
               <TableCell className="whitespace-nowrap text-sm">
                 {formatPeriod(statement.period_start, statement.period_end)}
