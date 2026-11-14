@@ -64,6 +64,8 @@ export type Cut = {
   /** The rent and dates set by hand (0075), in place of the ledger's. */
   manual?: boolean;
   rent?: string;
+  /** A nightly rate set by hand: the rent is it times the nights. */
+  rate?: string;
   checkIn?: string;
   checkOut?: string;
 };
@@ -78,6 +80,13 @@ const addDays = (date: string, days: number) => {
 /** Nights between two yyyy-mm-dd dates. */
 const nightsFrom = (checkIn: string, checkOut: string) =>
   Math.round((Date.parse(`${checkOut}T00:00:00Z`) - Date.parse(`${checkIn}T00:00:00Z`)) / 86_400_000);
+
+/** The rent for a nightly rate and dates set by hand, when all three are there. */
+const rentFor = (rate: string | undefined, checkIn: string | undefined, checkOut: string | undefined) => {
+  if (!rate || !checkIn || !checkOut || checkOut <= checkIn) return {};
+  const nights = nightsFrom(checkIn, checkOut);
+  return { rent: String(Math.round(Number(rate) * nights * 100) / 100) };
+};
 
 /** The booking's own fees, named, as the statement keeps them. */
 const feesOf = (c: Cut | undefined) =>
@@ -380,7 +389,7 @@ function BookingDeductions({
                 </label>
                 {cut.manual && (
                   <div className="space-y-2 rounded-md bg-[var(--muted)] p-2">
-                    <div className="grid gap-2 sm:grid-cols-3">
+                    <div className="grid grid-cols-2 gap-2">
                       <label className="space-y-1 text-xs text-[var(--muted-foreground)]">
                         <span>Check-in</span>
                         <Input
@@ -389,7 +398,7 @@ function BookingDeductions({
                           className="h-8"
                           aria-label={`${b.guest}: check-in on the statement`}
                           value={cut.checkIn ?? ""}
-                          onChange={(e) => setCut({ checkIn: e.target.value })}
+                          onChange={(e) => setCut({ checkIn: e.target.value, ...rentFor(cut.rate, e.target.value, cut.checkOut) })}
                         />
                       </label>
                       <label className="space-y-1 text-xs text-[var(--muted-foreground)]">
@@ -400,7 +409,21 @@ function BookingDeductions({
                           className="h-8"
                           aria-label={`${b.guest}: check-out on the statement`}
                           value={cut.checkOut ?? ""}
-                          onChange={(e) => setCut({ checkOut: e.target.value })}
+                          onChange={(e) => setCut({ checkOut: e.target.value, ...rentFor(cut.rate, cut.checkIn, e.target.value) })}
+                        />
+                      </label>
+                      <label className="space-y-1 text-xs text-[var(--muted-foreground)]">
+                        <span>Per night (AED)</span>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          step="0.01"
+                          placeholder="Optional"
+                          className="h-8"
+                          aria-label={`${b.guest}: rate per night (AED)`}
+                          value={cut.rate ?? ""}
+                          onChange={(e) => setCut({ rate: e.target.value, ...rentFor(e.target.value, cut.checkIn, cut.checkOut) })}
                         />
                       </label>
                       <label className="space-y-1 text-xs text-[var(--muted-foreground)]">
@@ -414,7 +437,7 @@ function BookingDeductions({
                           className="h-8"
                           aria-label={`${b.guest}: rent on the statement (AED)`}
                           value={cut.rent ?? ""}
-                          onChange={(e) => setCut({ rent: e.target.value })}
+                          onChange={(e) => setCut({ rent: e.target.value, rate: "" })}
                         />
                       </label>
                     </div>
