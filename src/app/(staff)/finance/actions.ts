@@ -100,6 +100,8 @@ const statementSchema = z.object({
           .default([]),
         // Set by hand (0075): the rent and dates the statement shows instead of the ledger's.
         rent: z.number().min(0, "A rent set by hand cannot be negative").max(10_000_000).optional(),
+        // The nightly rate the rent was worked out from; kept so Edit shows it.
+        rate: z.number().min(0).max(10_000_000).optional(),
         checkIn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         checkOut: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       })
@@ -136,6 +138,7 @@ function statementArgs(input: z.infer<typeof statementSchema>) {
             : {}),
         ...(a.items.length ? { items: a.items.map((i) => ({ description: i.description, amount: round2(i.amount) })) } : {}),
         ...(a.rent !== undefined ? { rent: round2(a.rent) } : {}),
+        ...(a.rent !== undefined && a.rate !== undefined ? { rate: round2(a.rate) } : {}),
         ...(a.checkIn && a.checkOut ? { check_in: a.checkIn, check_out: a.checkOut } : {}),
       })),
   };

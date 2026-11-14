@@ -304,6 +304,7 @@ function BookingDeductions({
       const byHand = c.manual
         ? {
             ...(c.rent !== undefined && c.rent !== "" ? { rent: Number(c.rent) } : {}),
+            ...(c.rent && c.rate ? { rate: Number(c.rate) } : {}),
             ...(c.checkIn && c.checkOut ? { checkIn: c.checkIn, checkOut: c.checkOut } : {}),
           }
         : {};
