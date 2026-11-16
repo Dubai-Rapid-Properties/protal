@@ -38,6 +38,8 @@ export default async function StatementsPage() {
       .order("full_name"),
     getCompanySettings(),
   ]);
+  // Only Jasko and Dulshan (company_settings.profit_viewer_ids, 0077) get the Company profit link.
+  const { data: seesProfit } = await supabase.rpc("can_see_company_profit");
 
   const statements = statementsResult.data ?? [];
   // Only used by the generate dialog, which only issuers see.
@@ -83,6 +85,11 @@ export default async function StatementsPage() {
         actions={
           <>
             <ExportButton rows={exportRows} filename="drp-owner-statements" />
+            {seesProfit === true && (
+              <Link href="/finance/profit" className="inline-flex h-9 items-center rounded-md border border-[var(--border)] px-3 text-sm hover:bg-[var(--muted)]">
+                Company profit
+              </Link>
+            )}
             {can(profile.role, "statements.issue") && (
               <GenerateStatementDialog owners={owners} vatRate={settings?.vat_rate} />
             )}
