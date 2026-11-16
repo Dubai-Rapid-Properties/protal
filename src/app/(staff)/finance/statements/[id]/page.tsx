@@ -11,6 +11,7 @@ import { StatementActions } from "./statement-actions";
 import { GenerateStatementDialog, type Draft } from "../generate-dialog";
 import { canApproveStatements, canDeleteStatements } from "../../actions";
 import { formatDateTime } from "@/lib/dates";
+import { statementProfit } from "@/lib/statements/profit";
 
 /** Shared by the page and its metadata, so the statement is fetched once. */
 const getStatement = cache(async (id: string) => {
@@ -53,7 +54,9 @@ export default async function StatementDetailPage({
   ]);
 
   if (!statement) notFound();
-  const canApprove = await canApproveStatements();
+  const [canApprove, { data: seesProfit }] = await Promise.all([canApproveStatements(), supabase.rpc("can_see_company_profit")]);
+  // What D|R|P keeps, per property (0077): only for the people allowed to see it.
+  const profit = seesProfit === true ? statementProfit(lines ?? []) : null;
   const otherCharges = (Array.isArray(statement.other_charges) ? statement.other_charges : []) as {
     description: string;
     amount: number;
@@ -259,6 +262,52 @@ export default async function StatementDetailPage({
                   <Money amount={deducted.reduce((sum, l) => sum + Number(l.deduction_aed), 0)} />
                 </li>
               </ul>
+            </CardContent>
+          </Card>
+        )}
+        {profit && profit.rows.length > 0 && (
+          <Card className="mb-5 border-emerald-300 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/20">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Company profit</CardTitle>
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Only you can see this. Management fee before VAT (the VAT goes to the FTA) plus the booking adjustments
+                taken off the owner&apos;s rent.
+              </p>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <table className="w-full min-w-[28rem] text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-[var(--muted-foreground)]">
+                    <th className="py-1 pr-3 font-medium">Property</th>
+                    <th className="py-1 pr-3 text-right font-medium">Mgmt fee</th>
+                    <th className="py-1 pr-3 text-right font-medium">Adjustments</th>
+                    <th className="py-1 text-right font-medium">Profit</th>
+                  </tr>
+                </thead>
+                <tbody className="tabular-nums">
+                  {profit.rows.map((r) => (
+                    <tr key={r.property} className="border-t border-[var(--border)]">
+                      <td className="py-1.5 pr-3">{r.property}</td>
+                      <td className="py-1.5 pr-3 text-right"><Money amount={r.fee} /></td>
+                      <td className="py-1.5 pr-3 text-right"><Money amount={r.adjustments} /></td>
+                      <td className="py-1.5 text-right font-medium"><Money amount={r.profit} /></td>
+                    </tr>
+                  ))}
+                  {profit.rows.length > 1 && (
+                    <tr className="border-t border-[var(--border)] font-medium">
+                      <td className="py-1.5 pr-3">Total</td>
+                      <td className="py-1.5 pr-3 text-right"><Money amount={profit.total.fee} /></td>
+                      <td className="py-1.5 pr-3 text-right"><Money amount={profit.total.adjustments} /></td>
+                      <td className="py-1.5 text-right"><Money amount={profit.total.profit} /></td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              {profit.total.feeVat > 0 && (
+                <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+                  VAT on the fee, collected for the FTA and not counted as profit: <Money amount={profit.total.feeVat} />
+                </p>
+              )}
             </CardContent>
           </Card>
         )}

@@ -760,6 +760,7 @@ export type Database = {
           email_owners_about_bookings: boolean;
           email_office_about_bookings: boolean;
           statement_approver_id: string | null;
+          profit_viewer_ids: string[];
           statement_legal_name: string;
         };
         Insert: {
@@ -803,6 +804,7 @@ export type Database = {
           email_owners_about_bookings?: boolean;
           email_office_about_bookings?: boolean;
           statement_approver_id?: string | null;
+          profit_viewer_ids?: string[];
           statement_legal_name?: string;
         };
         Update: {
@@ -846,6 +848,7 @@ export type Database = {
           email_owners_about_bookings?: boolean;
           email_office_about_bookings?: boolean;
           statement_approver_id?: string | null;
+          profit_viewer_ids?: string[];
           statement_legal_name?: string;
         };
         Relationships: [];
@@ -5590,6 +5593,10 @@ export type Database = {
       };
     };
     Functions: {
+      can_see_company_profit: {
+        Args: Record<string, never>;
+        Returns: boolean;
+      };
       notify_owner_contact: {
         Args: { p_ticket: string; p_title: string; p_body: string };
         Returns: number;
