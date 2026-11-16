@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
-import { FilePlus2, Pencil, Plus, X } from "lucide-react";
+import { FilePlus2, Pencil, Plus, Trash2, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,6 +66,8 @@ export type Cut = {
   /** The rent and dates set by hand (0075), in place of the ledger's. */
   manual?: boolean;
   rent?: string;
+  /** Taken off this statement (0076): left for a later one. */
+  exclude?: boolean;
   /** A nightly rate set by hand: the rent is it times the nights. */
   rate?: string;
   checkIn?: string;
@@ -289,33 +291,40 @@ function BookingDeductions({
     return b.amount - rent + adjust + feesOf(c).reduce((sum, f) => sum + f.amount, 0);
   };
   const cutOf = ownCutOf;
-  const income = bookings ? bookings.reduce((sum, b) => sum + b.amount - cutOf(b), 0) : null;
+  const kept = (bookings ?? []).filter((b) => !cuts[b.ledgerEntryId]?.exclude);
+  const income = bookings ? kept.reduce((sum, b) => sum + b.amount - cutOf(b), 0) : null;
   React.useEffect(() => onIncome(income), [income, onIncome]);
 
-  const payload = (bookings ?? [])
-    .filter(
-      (b) =>
-        Number(cuts[b.ledgerEntryId]?.value) > 0 ||
-        feesOf(cuts[b.ledgerEntryId]).length > 0 ||
-        cuts[b.ledgerEntryId]?.manual
-    )
-    .map((b) => {
-      const c: Cut = cuts[b.ledgerEntryId] ?? { value: "", unit: "aed" };
-      const v = (Number(c.value) || 0) * (c.add ? -1 : 1);
-      const items = feesOf(c);
-      const byHand = c.manual
-        ? {
-            ...(c.rent !== undefined && c.rent !== "" ? { rent: Number(c.rent) } : {}),
-            ...(c.rent && c.rate ? { rate: Number(c.rate) } : {}),
-            ...(c.checkIn && c.checkOut ? { checkIn: c.checkIn, checkOut: c.checkOut } : {}),
-          }
-        : {};
-      return v === 0
-        ? { ledgerEntryId: b.ledgerEntryId, items, ...byHand }
-        : c.unit === "pct"
-          ? { ledgerEntryId: b.ledgerEntryId, pct: v, items, ...byHand }
-          : { ledgerEntryId: b.ledgerEntryId, amount: v, items, ...byHand };
-    });
+  const removed = (bookings ?? [])
+    .filter((b) => cuts[b.ledgerEntryId]?.exclude)
+    .map((b) => ({ ledgerEntryId: b.ledgerEntryId, exclude: true }));
+  const payload = [
+    ...removed,
+    ...kept
+      .filter(
+        (b) =>
+          Number(cuts[b.ledgerEntryId]?.value) > 0 ||
+          feesOf(cuts[b.ledgerEntryId]).length > 0 ||
+          cuts[b.ledgerEntryId]?.manual
+      )
+      .map((b) => {
+        const c: Cut = cuts[b.ledgerEntryId] ?? { value: "", unit: "aed" };
+        const v = (Number(c.value) || 0) * (c.add ? -1 : 1);
+        const items = feesOf(c);
+        const byHand = c.manual
+          ? {
+              ...(c.rent !== undefined && c.rent !== "" ? { rent: Number(c.rent) } : {}),
+              ...(c.rent && c.rate ? { rate: Number(c.rate) } : {}),
+              ...(c.checkIn && c.checkOut ? { checkIn: c.checkIn, checkOut: c.checkOut } : {}),
+            }
+          : {};
+        return v === 0
+          ? { ledgerEntryId: b.ledgerEntryId, items, ...byHand }
+          : c.unit === "pct"
+            ? { ledgerEntryId: b.ledgerEntryId, pct: v, items, ...byHand }
+            : { ledgerEntryId: b.ledgerEntryId, amount: v, items, ...byHand };
+      }),
+  ];
 
   return (
     <div className="space-y-2">
@@ -354,16 +363,40 @@ function BookingDeductions({
                 />
               </label>
             );
+            if (cut.exclude) {
+              return (
+                <div key={b.ledgerEntryId} className="flex items-center justify-between gap-3 p-3 text-sm text-[var(--muted-foreground)]">
+                  <span>
+                    <span className="line-through">{b.guest}</span> · {aed(b.amount)} — taken off this statement, left for a later one
+                  </span>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setCut({ exclude: false })}>
+                    <Undo2 className="size-4" />
+                    Put back
+                  </Button>
+                </div>
+              );
+            }
             return (
               <div key={b.ledgerEntryId} className="space-y-2 p-3">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-sm font-medium">{b.guest}</span>
-                  <span className="text-sm tabular-nums">
+                  <span className="ml-auto text-sm tabular-nums">
                     {cut.manual && rentOf(b) !== b.amount && (
                       <span className="mr-2 text-xs text-[var(--muted-foreground)] line-through">{aed(b.amount)}</span>
                     )}
                     {aed(rentOf(b))}
                   </span>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-7 shrink-0 self-center"
+                    aria-label={`Take ${b.guest} off this statement`}
+                    title="Take off this statement"
+                    onClick={() => setCut({ exclude: true })}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
                 </div>
                 <p className="text-xs text-[var(--muted-foreground)]">
                   {[b.unit, b.checkIn && b.checkOut ? `${formatDate(b.checkIn)} – ${formatDate(b.checkOut)}` : null, b.nights != null ? `${b.nights} nights` : null]

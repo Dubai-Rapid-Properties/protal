@@ -100,6 +100,8 @@ const statementSchema = z.object({
           .default([]),
         // Set by hand (0075): the rent and dates the statement shows instead of the ledger's.
         rent: z.number().min(0, "A rent set by hand cannot be negative").max(10_000_000).optional(),
+        // Taken off this statement (0076).
+        exclude: z.boolean().optional(),
         // The nightly rate the rent was worked out from; kept so Edit shows it.
         rate: z.number().min(0).max(10_000_000).optional(),
         checkIn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -128,19 +130,20 @@ function statementArgs(input: z.infer<typeof statementSchema>) {
       i.pct !== undefined ? { description: i.description, pct: i.pct } : { description: i.description, amount: round2(i.amount ?? 0) }
     ),
     p_booking_adjustments: input.bookingAdjustments
-      .filter((a) => (a.pct ?? a.amount ?? 0) !== 0 || a.items.length > 0 || a.rent !== undefined || a.checkIn !== undefined)
-      .map((a) => ({
-        ledger_entry_id: a.ledgerEntryId,
-        ...(a.pct !== undefined && a.pct !== 0
-          ? { pct: a.pct }
-          : a.amount !== undefined && a.amount !== 0
-            ? { amount: round2(a.amount) }
-            : {}),
-        ...(a.items.length ? { items: a.items.map((i) => ({ description: i.description, amount: round2(i.amount) })) } : {}),
-        ...(a.rent !== undefined ? { rent: round2(a.rent) } : {}),
-        ...(a.rent !== undefined && a.rate !== undefined ? { rate: round2(a.rate) } : {}),
-        ...(a.checkIn && a.checkOut ? { check_in: a.checkIn, check_out: a.checkOut } : {}),
-      })),
+      .filter((a) => a.exclude || (a.pct ?? a.amount ?? 0) !== 0 || a.items.length > 0 || a.rent !== undefined || a.checkIn !== undefined)
+      .map((a) =>
+        a.exclude ? { ledger_entry_id: a.ledgerEntryId, exclude: true } : {
+          ledger_entry_id: a.ledgerEntryId,
+          ...(a.pct !== undefined && a.pct !== 0
+            ? { pct: a.pct }
+            : a.amount !== undefined && a.amount !== 0
+              ? { amount: round2(a.amount) }
+              : {}),
+          ...(a.items.length ? { items: a.items.map((i) => ({ description: i.description, amount: round2(i.amount) })) } : {}),
+          ...(a.rent !== undefined ? { rent: round2(a.rent) } : {}),
+          ...(a.rent !== undefined && a.rate !== undefined ? { rate: round2(a.rate) } : {}),
+          ...(a.checkIn && a.checkOut ? { check_in: a.checkIn, check_out: a.checkOut } : {}),
+        }),
   };
 }
 
