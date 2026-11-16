@@ -3217,6 +3217,7 @@ export type Database = {
           other_fees_aed: number;
           other_fees_note: string | null;
           unit_id: string | null;
+          excluded_entries: string[] | null;
           other_charges_aed: number;
           other_charges: Json;
           opening_balance_aed: number;
@@ -3257,6 +3258,7 @@ export type Database = {
           other_fees_aed?: number;
           other_fees_note?: string | null;
           unit_id?: string | null;
+          excluded_entries?: string[] | null;
           other_charges_aed?: number;
           other_charges?: Json;
           opening_balance_aed?: number;
@@ -3297,6 +3299,7 @@ export type Database = {
           other_fees_aed?: number;
           other_fees_note?: string | null;
           unit_id?: string | null;
+          excluded_entries?: string[] | null;
           other_charges_aed?: number;
           other_charges?: Json;
           opening_balance_aed?: number;

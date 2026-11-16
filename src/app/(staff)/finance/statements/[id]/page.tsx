@@ -84,8 +84,10 @@ export default async function StatementDetailPage({
           .map((l, key) => ({ key, description: l.description, amount: String(Number(l.amount_aed)), unit: "aed" as const })),
         // Other fees are entered on each booking now.
         others: [],
-        cuts: Object.fromEntries(
-          deducted
+        cuts: Object.fromEntries([
+          // Taken off this statement (0076): still off when it is edited.
+          ...(statement.excluded_entries ?? []).map((id) => [id, { value: "", unit: "aed" as const, exclude: true }]),
+          ...deducted
             .filter((l) => l.ledger_entry_id)
             .map((l) => {
               const fees = feesOn(l);
@@ -124,8 +126,8 @@ export default async function StatementDetailPage({
                     : {}),
                 },
               ];
-            })
-        ),
+            }),
+        ]),
       }
     : null;
 
