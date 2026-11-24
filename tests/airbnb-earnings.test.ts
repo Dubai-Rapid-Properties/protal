@@ -84,6 +84,15 @@ test("an export without a gross column derives it from payout plus fee", () => {
   assert.equal(earningsToBookingAmounts(r, 3).accommodation_aed, 900);
 });
 
+test("an export without a service fee column derives the commission from gross less payout", () => {
+  const csv = "Type,Confirmation Code,Currency,Amount,Gross Earnings\nReservation,HM39NCHPAH,AED,346.16,413.44\n";
+  const [r] = parseAirbnbEarnings(csv).reservations;
+  const a = earningsToBookingAmounts(r, 1);
+  assert.equal(a.accommodation_aed, 413.44);
+  assert.equal(a.channel_commission_aed, 67.28);
+  assert.equal(a.payout_expected_aed, 346.16);
+});
+
 test("a file that is not the earnings export is refused with a hint", () => {
   const { reservations, errors } = parseAirbnbEarnings("Name,Email\nA,b@c.com\n");
   assert.equal(reservations.length, 0);

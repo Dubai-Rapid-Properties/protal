@@ -195,6 +195,12 @@ export async function saveAirbnbReservation(
   // Same columns as the earnings import: the guest total includes Tourism
   // Dirham; the payout is what Airbnb pays after its host fee.
   const payout = input.payout || round2(input.roomFee + input.cleaningFee - input.hostServiceFee);
+  // The host service fee, else what the room and cleaning come to over the
+  // payout: Airbnb's fee line is not always read off the page, the payout is.
+  const commission =
+    input.hostServiceFee > 0 || !input.payout || input.roomFee <= 0
+      ? input.hostServiceFee
+      : Math.max(0, round2(input.roomFee + input.cleaningFee - input.payout));
   const amounts =
     input.roomFee > 0 || payout > 0
       ? {
@@ -203,7 +209,7 @@ export async function saveAirbnbReservation(
           cleaning_fee_aed: input.cleaningFee,
           extra_fees_aed: 0,
           tourism_dirham_aed: input.occupancyTaxes,
-          channel_commission_aed: input.hostServiceFee,
+          channel_commission_aed: commission,
           gross_total_aed: round2(input.roomFee + input.cleaningFee + input.occupancyTaxes),
           payout_expected_aed: payout > 0 ? payout : null,
         }
