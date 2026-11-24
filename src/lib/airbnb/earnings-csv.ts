@@ -244,7 +244,9 @@ export function earningsToBookingAmounts(e: AirbnbEarnings, nights: number) {
     cleaning_fee_aed: e.cleaningFee,
     extra_fees_aed: 0,
     tourism_dirham_aed: e.occupancyTaxes,
-    channel_commission_aed: e.serviceFee,
+    // The service fee, else what the gross comes to over the payout: some
+    // exports leave the fee column out, the gross and the amount are there.
+    channel_commission_aed: e.serviceFee > 0 ? e.serviceFee : round2(Math.max(0, e.grossEarnings - e.amount)),
     gross_total_aed: round2(e.grossEarnings + e.occupancyTaxes),
     payout_expected_aed: e.amount,
   };
