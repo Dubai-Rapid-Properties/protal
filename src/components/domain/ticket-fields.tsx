@@ -18,8 +18,19 @@ import {
  * kind), priority, title and details. Shared by the staff and owner forms so
  * both describe a ticket the same way.
  */
-export function TicketFields({ defaultKind = "repair" }: { defaultKind?: TicketKind }) {
+export function TicketFields({
+  defaultKind = "repair",
+  defaults,
+  showPriority = true,
+}: {
+  defaultKind?: TicketKind;
+  /** An existing ticket's values, when editing it */
+  defaults?: { category?: string; title?: string; description?: string | null; accessNotes?: string | null };
+  /** Off where priority is set elsewhere (the ticket page's Handling card) */
+  showPriority?: boolean;
+}) {
   const [kind, setKind] = React.useState<TicketKind>(defaultKind);
+  const categories = TICKET_CATEGORIES[kind] as string[];
 
   return (
     <>
@@ -64,23 +75,26 @@ export function TicketFields({ defaultKind = "repair" }: { defaultKind?: TicketK
         name="category"
         label="Category"
         required
-        defaultValue={TICKET_CATEGORIES[kind][0]}
+        defaultValue={defaults?.category && categories.includes(defaults.category) ? defaults.category : TICKET_CATEGORIES[kind][0]}
         options={TICKET_CATEGORIES[kind].map((c) => ({ value: c, label: MAINTENANCE_CATEGORY[c] }))}
       />
-      <SelectField
-        name="priority"
-        label="Priority"
-        required
-        defaultValue="medium"
-        options={optionsFrom(MAINTENANCE_PRIORITY)}
-        hint="Emergency: water leak, no power, security risk."
-      />
+      {showPriority && (
+        <SelectField
+          name="priority"
+          label="Priority"
+          required
+          defaultValue="medium"
+          options={optionsFrom(MAINTENANCE_PRIORITY)}
+          hint="Emergency: water leak, no power, security risk."
+        />
+      )}
       <TextField
         name="title"
         label="Short title"
         required
         maxLength={150}
         wide
+        defaultValue={defaults?.title}
         placeholder={kind === "repair" ? "AC not cooling in the bedroom" : "Loud music from the next unit at night"}
       />
       <TextAreaField
@@ -88,6 +102,7 @@ export function TicketFields({ defaultKind = "repair" }: { defaultKind?: TicketK
         label="Details"
         rows={4}
         maxLength={4000}
+        defaultValue={defaults?.description ?? undefined}
         placeholder="What happened, since when, anything already tried."
       />
       <TextAreaField
@@ -95,6 +110,7 @@ export function TicketFields({ defaultKind = "repair" }: { defaultKind?: TicketK
         label="Access notes"
         rows={2}
         maxLength={1000}
+        defaultValue={defaults?.accessNotes ?? undefined}
         placeholder="Keys, best time to visit, guest or tenant in the unit, pets."
       />
     </>

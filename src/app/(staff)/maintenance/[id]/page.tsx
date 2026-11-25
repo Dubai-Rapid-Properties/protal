@@ -17,6 +17,8 @@ import { toTicketNotes } from "@/lib/tickets/notes";
 import { DetailsCard, StatusCard } from "./ticket-panel";
 import { DeleteTicketButton } from "./delete-ticket";
 import { OwnerContactCard } from "./owner-contact";
+import { ReportCard } from "./report-card";
+import type { TicketKind } from "@/lib/labels";
 import { OWNER_CONTACT_EVERY_HOURS } from "@/lib/tickets/owner-contact";
 
 export const metadata = { title: "Ticket" };
@@ -93,6 +95,21 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
 
   const unitLabel = `${t.units?.properties?.name ?? ""} · ${t.units?.unit_number ?? ""}`;
   const canManage = can(profile.role, "maintenance.assign");
+  // Units the ticket can move to, when staff correct it (as on the new-ticket form).
+  const { data: unitRows } = canManage
+    ? await supabase
+        .from("v_units_overview")
+        .select("id, unit_number, property_name, owner_name, is_active")
+        .order("property_name")
+        .order("unit_number")
+    : { data: [] };
+  const units = (unitRows ?? [])
+    .filter((u) => u.is_active || u.id === t.unit_id)
+    .map((u) => ({
+      id: u.id!,
+      label: `${u.property_name} · ${u.unit_number}${u.owner_name ? ` (${u.owner_name})` : ""}`,
+    }));
+
   const waitingOwner = t.owner_approval_required && !t.owner_approved_at && !t.owner_rejected_at;
 
   return (
@@ -134,11 +151,22 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
 
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="space-y-5 lg:col-span-2">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Details</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <ReportCard
+            ticketId={t.id}
+            canEdit={canManage}
+            units={units}
+            current={{
+              unitId: t.unit_id,
+              reportedBy: t.raised_by_kind,
+              reportedOn: new Date(t.reported_at).toLocaleDateString("en-CA", { timeZone: "Asia/Dubai" }),
+              kind: t.kind as TicketKind,
+              category: t.category,
+              title: t.title,
+              description: t.description,
+              accessNotes: t.access_notes,
+            }}
+          >
+            <div className="space-y-4">
               <FieldGrid columns={2}>
                 <Field label="Unit">
                   {t.units ? (
@@ -174,8 +202,8 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
                   <p className="mt-1 whitespace-pre-line text-sm">{t.resolution_notes}</p>
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </ReportCard>
 
           <Card>
             <CardHeader className="pb-3">
