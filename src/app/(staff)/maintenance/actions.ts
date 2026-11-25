@@ -185,6 +185,93 @@ export async function updateTicketDetails(
   };
 }
 
+const reportSchema = z
+  .object({
+    unitId: z.string().uuid("Choose the unit"),
+    reportedBy: z.enum(["staff", "owner", "tenant", "guest"]),
+    reportedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose the date it was reported"),
+    kind: z.enum(["repair", "complaint"]),
+    category: z.string(),
+    title: z.string().trim().min(3, "Give the ticket a short title").max(150),
+    description: z.string().trim().max(4000).optional(),
+    accessNotes: z.string().trim().max(1000).optional(),
+  })
+  .refine((t) => (TICKET_CATEGORIES[t.kind] as string[]).includes(t.category), {
+    message: "Choose a category",
+    path: ["category"],
+  });
+
+/** A timestamp's date in Dubai, as the edit form shows it */
+const dubaiDay = (at: string) => new Date(at).toLocaleDateString("en-CA", { timeZone: "Asia/Dubai" });
+
+const REPORT_FIELDS = {
+  unit_id: "unit",
+  raised_by_kind: "reported by",
+  kind: "type",
+  category: "category",
+  title: "title",
+  description: "details",
+  access_notes: "access notes",
+} as const;
+
+/** Corrects what was reported: unit, who and when, type, category, title, details, access. */
+export async function updateTicketReport(
+  ticketId: string,
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "maintenance.assign")) return { error: "You do not have permission to update tickets." };
+  if (!z.string().uuid().safeParse(ticketId).success) return { error: "Unknown ticket." };
+  const parsed = reportSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form." };
+  const t = parsed.data;
+
+  const supabase = await createClient();
+  const { data: before } = await supabase
+    .from("maintenance_requests")
+    .select("unit_id, raised_by_kind, reported_at, kind, category, title, description, access_notes")
+    .eq("id", ticketId)
+    .maybeSingle();
+  if (!before) return { error: NOT_CHANGED };
+
+  const next = {
+    unit_id: t.unitId,
+    raised_by_kind: t.reportedBy,
+    kind: t.kind,
+    category: t.category as Enums<"maintenance_category">,
+    title: t.title,
+    description: t.description || null,
+    access_notes: t.accessNotes || null,
+  };
+  const changed: string[] = (Object.keys(REPORT_FIELDS) as (keyof typeof REPORT_FIELDS)[])
+    .filter((k) => (before[k] ?? null) !== next[k])
+    .map((k) => REPORT_FIELDS[k]);
+  // The date only: keep the time it came in unless the day changes.
+  const sameDay = dubaiDay(before.reported_at) === t.reportedOn;
+  if (!sameDay) changed.push("reported date");
+  if (!changed.length) return { success: "Nothing to change." };
+
+  const { data, error } = await supabase
+    .from("maintenance_requests")
+    .update({ ...next, ...(sameDay ? {} : { reported_at: `${t.reportedOn}T09:00:00+04:00` }) })
+    .eq("id", ticketId)
+    .select("id");
+  if (error) return { error: explain(error) };
+  if (!data?.length) return { error: NOT_CHANGED };
+
+  await supabase.from("maintenance_updates").insert({
+    request_id: ticketId,
+    author_id: profile.id,
+    note: `Edited the ticket: ${changed.join(", ")}.`,
+    is_internal: true,
+  });
+
+  revalidatePath("/maintenance");
+  revalidatePath(`/maintenance/${ticketId}`);
+  return { success: "Saved." };
+}
+
 /**
  * Removes a ticket completely: its timeline and notifications go with it.
  * For tickets raised by mistake or as a test; a real job that is not going
