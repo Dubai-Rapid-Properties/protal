@@ -86,7 +86,7 @@ export default async function DashboardPage() {
       supabase
         .from("bookings")
         .select(
-          "id, unit_id, check_in, check_out, check_in_time, check_out_time, adults, children, guest_count_known, guests(full_name), units(unit_number, properties(name))"
+          "id, unit_id, check_in, check_out, check_in_time, check_out_time, adults, children, guest_count_known, special_requests, guests(full_name), units(unit_number, properties(name))"
         )
         .in("status", ["confirmed", "checked_in", "checked_out"])
         .or(`check_in.in.(${today},${tomorrow}),check_out.in.(${today},${tomorrow})`)
@@ -153,6 +153,7 @@ export default async function DashboardPage() {
     checkIn: b.check_in,
     checkOut: b.check_out,
     checkInTime: b.check_in_time,
+    requests: b.special_requests,
     checkOutTime: b.check_out_time,
     guests: b.guest_count_known ? b.adults + b.children : null,
   }));

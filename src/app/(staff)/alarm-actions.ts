@@ -66,12 +66,19 @@ export interface StayAlarm {
   unitId: string;
   unit: string;
   guest: string | null;
-  /** "prepare": the guest arrives tomorrow; housekeeping gets the unit ready (0044). */
-  kind: "check_out" | "check_in" | "prepare";
+  /**
+   * "prepare": the guest arrives tomorrow; housekeeping gets the unit ready (0044).
+   * "request": what the guest asked for (crib, spare sheets ...), from 10:00 the day before check-in (0079).
+   */
+  kind: "check_out" | "check_in" | "prepare" | "request";
   /** 1 = an hour ahead (or, for "prepare", from 16:00 the day before), 2 = on the time. */
   stage: 1 | 2;
   /** Dubai time of the check-out or check-in, e.g. "12:00". */
   dueAt: string;
+  /** Check-in date, YYYY-MM-DD. */
+  checkIn: string;
+  /** The guest's special requests, on "request" and "prepare" rings. */
+  note: string | null;
 }
 
 const STAY_ALARM_ROLES = new Set(["super_admin", "maintenance"]);
@@ -79,7 +86,8 @@ const STAY_ALARM_ROLES = new Set(["super_admin", "maintenance"]);
 /**
  * Today's check-outs (rings 11:00 and 12:00) and check-ins (14:00 and 15:00),
  * Dubai time, that nobody has answered yet (0042), and for housekeeping,
- * tomorrow's check-ins from 16:00 (0044). Super admins and housekeeping only;
+ * tomorrow's check-ins from 16:00 (0044), and guests' special requests from
+ * 10:00 the day before check-in (0079). Super admins and housekeeping only;
  * everyone else gets an empty list.
  */
 export async function getStayAlarms(): Promise<StayAlarm[]> {
@@ -98,6 +106,8 @@ export async function getStayAlarms(): Promise<StayAlarm[]> {
     kind: StayAlarm["kind"];
     stage: StayAlarm["stage"];
     due_at: string;
+    check_in: string;
+    note: string | null;
   }[];
   return rows.map((r) => ({
     bookingId: r.booking_id,
@@ -108,12 +118,14 @@ export async function getStayAlarms(): Promise<StayAlarm[]> {
     kind: r.kind,
     stage: r.stage,
     dueAt: r.due_at,
+    checkIn: r.check_in,
+    note: r.note,
   }));
 }
 
 const stayAlarmAck = z.object({
   bookingId: z.string().uuid(),
-  kind: z.enum(["check_out", "check_in", "prepare"]),
+  kind: z.enum(["check_out", "check_in", "prepare", "request"]),
   stage: z.union([z.literal(1), z.literal(2)]),
 });
 

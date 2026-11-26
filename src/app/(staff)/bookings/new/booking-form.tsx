@@ -371,6 +371,14 @@ export function BookingForm({
 
       <FormSection title="Notes" columns={1}>
         <TextAreaField name="guestMessage" label="Message from the guest" rows={2} />
+        <TextAreaField
+          name="specialRequests"
+          label="Special requests"
+          rows={2}
+          maxLength={1000}
+          placeholder="Crib. Spare sheets: 3 guests in total."
+          hint="Rings for super admins and housekeeping from 10:00 the day before check-in until someone presses Done."
+        />
         <TextAreaField name="internalNotes" label="Internal notes" rows={2} defaultValue={defaultNotes} />
       </FormSection>
 

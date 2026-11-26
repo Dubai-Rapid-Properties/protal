@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LogIn, LogOut, Repeat } from "lucide-react";
+import { ClipboardList, LogIn, LogOut, Repeat } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/dates";
@@ -14,6 +14,8 @@ export interface Movement {
   checkInTime: string | null;
   checkOutTime: string | null;
   guests: number | null;
+  /** What the guest asked for: crib, spare sheets ... */
+  requests: string | null;
 }
 
 const hhmm = (t: string | null) => t?.slice(0, 5) ?? null;
@@ -73,6 +75,12 @@ function List({
                     ? ` · until ${formatDate(m.checkOut)}`
                     : ` · since ${formatDate(m.checkIn)}`}
                 </p>
+                {kind === "in" && m.requests && (
+                  <p className="mt-0.5 flex items-start gap-1 text-xs font-medium text-[var(--warning)]">
+                    <ClipboardList className="mt-px size-3.5 shrink-0" />
+                    <span className="whitespace-pre-line">{m.requests}</span>
+                  </p>
+                )}
               </li>
             );
           })}

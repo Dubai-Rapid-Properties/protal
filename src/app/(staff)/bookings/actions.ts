@@ -196,6 +196,7 @@ const bookingSchema = z
     damageDeposit: money.default(0),
     guestMessage: z.string().max(2000).optional(),
     internalNotes: z.string().max(2000).optional(),
+    specialRequests: z.string().max(1000).optional(),
   })
   .refine((v) => v.checkOut > v.checkIn, {
     message: "Check-out must be after check-in.",
@@ -308,6 +309,7 @@ export async function createBooking(
       damage_deposit_aed: input.damageDeposit,
       guest_message: input.guestMessage || null,
       internal_notes: input.internalNotes || null,
+      special_requests: input.specialRequests?.trim() || null,
       created_by: profile.id,
     })
     .select("id")
@@ -1284,4 +1286,43 @@ export async function updateStayTimes(
   revalidatePath(`/bookings/${bookingId}`);
   revalidatePath(`/units/${changed[0].unit_id}`);
   return { success: "Times saved. The alarms and the cleaning follow them." };
+}
+
+const requestsSchema = z.object({ specialRequests: z.string().max(1000, "Keep it under 1000 characters").optional() });
+
+/**
+ * What the guest asked for: a crib, spare sheets, ... It rings for super
+ * admins and the unit's housekeeping from 10:00 the day before check-in until
+ * someone presses Done (0079). A changed request rings again.
+ */
+export async function updateSpecialRequests(
+  bookingId: string,
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const profile = await requireProfile();
+  if (!can(profile.role, "bookings.manage")) {
+    return { error: "You do not have permission to change bookings." };
+  }
+  if (!z.string().uuid().safeParse(bookingId).success) return { error: "Booking not found." };
+  const parsed = requestsSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the requests." };
+  const requests = parsed.data.specialRequests?.trim() || null;
+
+  const supabase = await createClient();
+  const { data: changed, error } = await supabase
+    .from("bookings")
+    .update({ special_requests: requests })
+    .eq("id", bookingId)
+    .select("unit_id");
+  if (error) return { error: explain(error) };
+  if (!changed?.length) return { error: "This booking could not be changed." };
+
+  revalidatePath(`/bookings/${bookingId}`);
+  revalidatePath("/dashboard");
+  return {
+    success: requests
+      ? "Special requests saved. The alarm rings from 10:00 the day before check-in until someone presses Done."
+      : "Special requests removed.",
+  };
 }
