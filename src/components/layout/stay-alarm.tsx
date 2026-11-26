@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { BedDouble, BellRing, Check, DoorClosed, DoorOpen } from "lucide-react";
+import { BedDouble, BellRing, Check, ClipboardList, DoorClosed, DoorOpen } from "lucide-react";
 import { toast } from "sonner";
 import { noteIfStale, portalIsStale } from "@/lib/stale-client";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,14 @@ const POLL_MS = 30_000;
 
 const key = (a: StayAlarm) => `${a.bookingId}:${a.kind}:${a.stage}`;
 
+/** "today" or "tomorrow", by the Dubai date. */
+function whenIn(a: StayAlarm) {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai" }).format(new Date());
+  return a.checkIn === today ? "today" : "tomorrow";
+}
+
 function label(a: StayAlarm) {
+  if (a.kind === "request") return `Special request · check-in ${whenIn(a)} (${a.dueAt})`;
   if (a.kind === "prepare") return `Check-in tomorrow (${a.dueAt}): get the unit ready`;
   const what = a.kind === "check_out" ? "Check-out" : "Check-in";
   return a.stage === 1 ? `${what} in 1 hour (${a.dueAt})` : `${what} now (${a.dueAt})`;
@@ -24,6 +31,8 @@ function label(a: StayAlarm) {
  * leave by 12:00 and arrive from 15:00, Dubai time; for every stay ending or
  * starting today the alarm rings an hour ahead and again on the time, and
  * keeps ringing until someone presses "Done". There is no silence button.
+ * A guest's special requests (crib, spare sheets ...) ring from 10:00 the
+ * day before check-in, saying what was asked.
  */
 export function StayAlarmBanner() {
   const [alarms, setAlarms] = React.useState<StayAlarm[]>([]);
@@ -76,7 +85,9 @@ export function StayAlarmBanner() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="flex items-center gap-2 font-semibold">
           <BellRing className="size-5 animate-bounce" />
-          {alarms.every((a) => a.kind === "prepare")
+          {alarms.every((a) => a.kind === "request")
+            ? `${alarms.length} special request${alarms.length === 1 ? "" : "s"} to get ready`
+            : alarms.every((a) => a.kind === "prepare")
             ? `${alarms.length} check-in${alarms.length === 1 ? "" : "s"} tomorrow to get ready`
             : alarms.length === 1
               ? "Check-out / check-in today"
@@ -92,20 +103,30 @@ export function StayAlarmBanner() {
             key={key(a)}
             className="flex flex-col gap-2 rounded-md bg-[var(--warning)]/15 p-2 text-sm sm:flex-row sm:items-center sm:justify-between"
           >
-            <p className="flex flex-wrap items-center gap-x-1">
-              {a.kind === "check_out" ? (
-                <DoorOpen className="size-4" />
-              ) : a.kind === "prepare" ? (
-                <BedDouble className="size-4" />
-              ) : (
-                <DoorClosed className="size-4" />
+            <div className="min-w-0">
+              <p className="flex flex-wrap items-center gap-x-1">
+                {a.kind === "check_out" ? (
+                  <DoorOpen className="size-4" />
+                ) : a.kind === "prepare" ? (
+                  <BedDouble className="size-4" />
+                ) : a.kind === "request" ? (
+                  <ClipboardList className="size-4" />
+                ) : (
+                  <DoorClosed className="size-4" />
+                )}
+                <span className="font-medium">{label(a)}</span> · <span>{a.unit}</span>
+                {a.guest && ` · ${a.guest}`} ·{" "}
+                <Link href={`/bookings/${a.bookingId}`} className="underline underline-offset-2">
+                  {a.bookingNumber}
+                </Link>
+              </p>
+              {a.note && (
+                <p className="mt-1 whitespace-pre-line font-medium">
+                  {a.kind === "prepare" ? "Also asked for: " : ""}
+                  {a.note}
+                </p>
               )}
-              <span className="font-medium">{label(a)}</span> · <span>{a.unit}</span>
-              {a.guest && ` · ${a.guest}`} ·{" "}
-              <Link href={`/bookings/${a.bookingId}`} className="underline underline-offset-2">
-                {a.bookingNumber}
-              </Link>
-            </p>
+            </div>
             <Button type="button" size="sm" disabled={busy === key(a)} onClick={() => done(a)}>
               <Check className="size-4" />
               Done

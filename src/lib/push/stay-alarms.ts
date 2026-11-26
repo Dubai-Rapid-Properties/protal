@@ -16,7 +16,7 @@ export interface PushMessage {
   ack?: Ack | Ack[];
 }
 
-type Kind = "check_out" | "check_in" | "prepare";
+type Kind = "check_out" | "check_in" | "prepare" | "request";
 type Ack = { bookingId: string; kind: Kind; stage: 1 | 2 };
 
 type Ring = {
@@ -30,6 +30,10 @@ type Ring = {
   kind: Kind;
   stage: 1 | 2;
   due_at: string;
+  check_in: string;
+  guest_name: string | null;
+  /** The guest's special requests, on "request" and "prepare" rings. */
+  note: string | null;
 };
 
 /** Push services want a way to reach the sender: the portal's address. */
@@ -60,7 +64,7 @@ export async function getVapidKeys(admin: Client): Promise<VapidKeys> {
  * units ready the day before, and "Done" answers them all.
  */
 function prepareMessage(rings: Ring[]): PushMessage {
-  const units = rings.map((r) => r.unit_label);
+  const units = rings.map((r) => (r.note ? `${r.unit_label} (${short(r.note, 60)})` : r.unit_label));
   const n = rings.length;
   return {
     title: `Tomorrow: ${n} check-in${n === 1 ? "" : "s"} to get ready`,
@@ -71,7 +75,25 @@ function prepareMessage(rings: Ring[]): PushMessage {
   };
 }
 
+const short = (text: string, max = 160) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+/** "today" or "tomorrow", by the Dubai date. */
+const dubaiDay = (iso: string) =>
+  iso === new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai" }).format(new Date()) ? "today" : "tomorrow";
+
+/** What the guest asked for, one notification per stay. */
+function requestMessage(r: Ring): PushMessage {
+  return {
+    title: `Special request · check-in ${dubaiDay(r.check_in)} (${r.due_at})`,
+    body: `${r.unit_label}${r.guest_name ? ` · ${r.guest_name}` : ""}: ${short(r.note ?? "")}`,
+    tag: `request-${r.booking_id}`,
+    url: `/bookings/${r.booking_id}`,
+    ack: { bookingId: r.booking_id, kind: r.kind, stage: r.stage },
+  };
+}
+
 function alarmMessage(r: Ring): PushMessage {
+  if (r.kind === "request") return requestMessage(r);
   const what = r.kind === "check_out" ? "Check-out" : "Check-in";
   return {
     title: r.stage === 1 ? `${what} in 1 hour (${r.due_at})` : `${what} now (${r.due_at})`,

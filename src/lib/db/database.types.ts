@@ -265,6 +265,9 @@ export type Database = {
           prepare_alarm_done: number;
           prepare_alarm_done_by: string | null;
           moved_from_unit_id: string | null;
+          special_requests: string | null;
+          special_requests_done_at: string | null;
+          special_requests_done_by: string | null;
         };
         Insert: {
           id?: string;
@@ -318,6 +321,9 @@ export type Database = {
           prepare_alarm_done?: number;
           prepare_alarm_done_by?: string | null;
           moved_from_unit_id?: string | null;
+          special_requests?: string | null;
+          special_requests_done_at?: string | null;
+          special_requests_done_by?: string | null;
         };
         Update: {
           id?: string;
@@ -371,6 +377,9 @@ export type Database = {
           prepare_alarm_done?: number;
           prepare_alarm_done_by?: string | null;
           moved_from_unit_id?: string | null;
+          special_requests?: string | null;
+          special_requests_done_at?: string | null;
+          special_requests_done_by?: string | null;
         };
         Relationships: [
           {
@@ -397,6 +406,13 @@ export type Database = {
           {
             foreignKeyName: "bookings_prepare_alarm_done_by_fkey";
             columns: ["prepare_alarm_done_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "bookings_special_requests_done_by_fkey";
+            columns: ["special_requests_done_by"];
             isOneToOne: false;
             referencedRelation: "profiles";
             referencedColumns: ["id"];

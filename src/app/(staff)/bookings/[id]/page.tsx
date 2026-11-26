@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { BellRing, Check, Plus } from "lucide-react";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
@@ -10,17 +10,25 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BookingStatusBadge, ChannelBadge, IncidentStatusBadge } from "@/components/domain/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatDateTime } from "@/lib/dates";
 import { INCIDENT_CATEGORY, SALES_CHANNEL, type IncidentCategory } from "@/lib/labels";
 import { BookingActions, DeleteBookingButton } from "./booking-actions";
 import { GuestDialog } from "./guest-dialog";
 import { KeptPayoutDialog } from "./kept-payout-dialog";
 import { MoveDialog } from "./move-dialog";
 import { PriceDialog } from "./price-dialog";
+import { RequestsDialog } from "./requests-dialog";
 import { StayDialog } from "./stay-dialog";
 import { TimesDialog } from "./times-dialog";
 
 export const metadata = { title: "Booking" };
+
+/** The day before a YYYY-MM-DD date. */
+function dayBefore(iso: string) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
 
 export default async function BookingPage({
   params,
@@ -48,7 +56,7 @@ export default async function BookingPage({
   const canSeeIncidents = can(profile.role, "incidents.view");
   const canManage = can(profile.role, "bookings.manage");
   const movable = canManage && ["inquiry", "tentative", "confirmed", "checked_in"].includes(b.status);
-  const [{ data: unitOwner }, { data: incidents }, { data: otherUnits }] = await Promise.all([
+  const [{ data: unitOwner }, { data: incidents }, { data: otherUnits }, { data: requestsDoneBy }] = await Promise.all([
     supabase.from("v_units_overview").select("owner_id, owner_name").eq("id", b.unit_id).maybeSingle(),
     canSeeIncidents
       ? supabase
@@ -67,6 +75,10 @@ export default async function BookingPage({
           .neq("id", b.unit_id)
           .order("property_name")
           .order("unit_number")
+      : Promise.resolve({ data: null }),
+    // Who pressed Done on the special requests alarm
+    b.special_requests_done_by
+      ? supabase.from("profiles").select("full_name").eq("id", b.special_requests_done_by).maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
 
@@ -139,6 +151,52 @@ export default async function BookingPage({
             )}
           </Callout>
         </div>
+      )}
+
+      {(b.special_requests || (canManage && !["cancelled", "no_show", "checked_out"].includes(b.status))) && (
+        <Card
+          className={
+            b.special_requests && !b.special_requests_done_at
+              ? "mb-5 border-2 border-[var(--warning)]"
+              : "mb-5"
+          }
+        >
+          <CardHeader className="flex-row items-center justify-between gap-2 pb-3">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <BellRing className="size-4" />
+                Special requests
+              </CardTitle>
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Rings for super admins and housekeeping from 10:00 the day before check-in until
+                someone presses Done.
+              </p>
+            </div>
+            {canManage && <RequestsDialog bookingId={b.id} requests={b.special_requests} />}
+          </CardHeader>
+          <CardContent className="text-sm">
+            {b.special_requests ? (
+              <>
+                <p className="whitespace-pre-line text-base font-medium">{b.special_requests}</p>
+                <p className="mt-2 flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
+                  {b.special_requests_done_at ? (
+                    <>
+                      <Check className="size-3.5" />
+                      Done {formatDateTime(b.special_requests_done_at)}
+                      {requestsDoneBy?.full_name && ` by ${requestsDoneBy.full_name}`}
+                    </>
+                  ) : (
+                    <>Not done yet · the alarm rings from 10:00 on {formatDate(dayBefore(b.check_in))}</>
+                  )}
+                </p>
+              </>
+            ) : (
+              <p className="text-[var(--muted-foreground)]">
+                None. Add one (crib, spare sheets ...) and the team is reminded before the guest arrives.
+              </p>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid gap-5 lg:grid-cols-3">
